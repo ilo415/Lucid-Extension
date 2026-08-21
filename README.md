@@ -14,8 +14,8 @@ Choose the one for your device. Clicking a link downloads the file directly.
 
 ### 🖥️ Desktop — browser extension (Chrome, Edge, Opera GX, Brave, Vivaldi)
 
-1. 📦 **Download the extension folder:** [Lucid — as a ZIP](https://github.com/ilo415/Lucid-Extension/archive/refs/heads/main.zip)
-   *(or browse it: [Lucid/ folder](https://github.com/ilo415/Lucid-Extension/tree/main/Lucid))*
+1. 📦 **Download the extension:** [Lucid-desktop.zip](https://github.com/ilo415/Lucid-Extension/raw/main/dist/Lucid-desktop.zip)
+   *(just the desktop extension — everything you need, nothing else)*
 2. **Unzip** it to a folder you'll keep (e.g. `Downloads/Lucid`).
 3. Open your browser's extensions page:
    - Chrome/Edge/Brave/Vivaldi: `chrome://extensions`
