@@ -26,8 +26,6 @@ Fixes go through DreamJourney's **own edit dialog** (click Edit → rewrite raw 
   | `[BRAIN]:` junk | Marker at the top of the reply | Strips it |
 - **Quote cleanup** — normalizes smart/curly quotes to straight ASCII so DreamJourney's dialogue highlighter actually matches.
 
-Lucid deliberately does **not** rely on any per-user prompt conventions (SEER director templates, CAS headers, etc.) — it only reacts to the structural thinking-block markup itself, so it works for anyone's roleplay setup.
-
 ---
 
 ## Structure
