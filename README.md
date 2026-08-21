@@ -8,6 +8,35 @@ Fixes go through DreamJourney's **own edit dialog** (click Edit → rewrite raw 
 
 ---
 
+## 📥 Download
+
+Choose the one for your device. Clicking a link downloads the file directly.
+
+### 🖥️ Desktop — browser extension (Chrome, Edge, Opera GX, Brave, Vivaldi)
+
+1. 📦 **Download the extension folder:** [Lucid — as a ZIP](https://github.com/ilo415/Lucid-Extension/archive/refs/heads/main.zip)
+   *(or browse it: [Lucid/ folder](https://github.com/ilo415/Lucid-Extension/tree/main/Lucid))*
+2. **Unzip** it to a folder you'll keep (e.g. `Downloads/Lucid`).
+3. Open your browser's extensions page:
+   - Chrome/Edge/Brave/Vivaldi: `chrome://extensions`
+   - Opera GX / Opera: `opera://extensions`
+4. Turn on **Developer mode** (top-right).
+5. Click **Load unpacked** and select the **`Lucid`** folder you unzipped.
+6. Open a DreamJourney chat. Done.
+
+> Keep that `Lucid` folder — the extension runs from it. Don't delete it after loading.
+
+### 📱 Phone — mobile userscript (Android / iPhone / iPad)
+
+1. ⬇️ **Download the userscript:** [Lucid.user.js](https://github.com/ilo415/Lucid-Extension/raw/main/Lucid-Mobile/Lucid.user.js)
+   *(or view it: [Lucid-Mobile/ folder](https://github.com/ilo415/Lucid-Extension/tree/main/Lucid-Mobile))*
+2. **Android:** install [Tampermonkey](https://play.google.com/store/apps/details?id=net.tampermonkey.droid) (or use [Kiwi Browser](https://play.google.com/store/apps/details?id=com.kiwibrowser.browser.next) to load the desktop extension directly), then open the `.user.js` — it registers itself.
+3. **iPhone/iPad:** install [Userscripts](https://apps.apple.com/app/userscripts/id1463298887) (Settings → Safari → Extensions → enable it), then open `Lucid.user.js` in Safari.
+
+Full phone steps: see [Lucid-Mobile/README-MOBILE.md](https://github.com/ilo415/Lucid-Extension/blob/main/Lucid-Mobile/README-MOBILE.md).
+
+---
+
 ## What it does
 
 - **Per-message wand button** — a wand appears on any message with a thinking block; click it to check or mend that one message on demand. No background edits.
