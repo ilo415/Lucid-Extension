@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>DJ Thinking Fixer — DOM fixture tests</title>
+<style>
+  body { background:#14141f; color:#e2e8f0; font-family: 'Segoe UI', sans-serif; padding: 20px; }
+  h1 { color:#c4b5fd; font-size: 18px; }
+  .msg { background:#1e1e30; border:1px solid #333; border-radius:12px; padding:12px 16px; margin:14px 0; max-width:720px; }
+  .msg pre { background:#0f0f1c; border:1px solid #2a2a44; border-radius:8px; padding:10px; white-space:pre-wrap; font-size:12px; color:#cbd5e1; }
+  .msg .result { font-size:11px; margin-top:8px; padding-top:6px; border-top:1px dashed #333; color:#64748b; }
+  .ok { color:#34d399; } .bad { color:#f87171; }
+  .test-head { display:flex; justify-content:space-between; align-items:center; }
+</style>
+</head>
+<body>
+<h1>🧠 DJ Thinking Fixer — DOM fixtures</h1>
+<p style="font-size:12px;color:#64748b">Each fixture is a fake DJ message. The page runs <code>DJTFCore.repairMessage</code> on it and reports what happened. Passing = the thinking block is canonical and the response is intact.</p>
+
+<div id="results" style="font-size:13px;margin:10px 0;font-weight:600"></div>
+
+<div id="fixtures">
+  <!-- A: well-formed, fenced -->
+  <div class="msg" data-name="A: well-formed">
+    <div class="test-head"><b>A: well-formed, fenced</b><span class="result">expect: no repair, collapse shell</span></div>
+    <pre><code>&lt;thinking&gt;
+1) I am roleplay director.
+2) story reflection
+&lt;/thinking&gt;</code></pre>
+    <p>Huahua goes still when your arm wraps around her.</p>
+  </div>
+
+  <!-- B: missing closing fence — response swallowed -->
+  <div class="msg" data-name="B: missing closing fence">
+    <div class="test-head"><b>B: forgot closing fence, response swallowed</b><span class="result">expect: thinking fixed, response lifted out &amp; rendered</span></div>
+    <pre><code>&lt;thinking&gt;
+1) I am roleplay director.
+2) story reflection
+&lt;/thinking&gt;
+
+**Huahua goes still.** She watches the brush move.
+
+&gt; The air hums with residual energy.</code></pre>
+  </div>
+
+  <!-- C: swapped tags (closing at top) -->
+  <div class="msg" data-name="C: swapped tags">
+    <div class="test-head"><b>C: closing tag at top, opening at bottom</b><span class="result">expect: order fixed, body kept</span></div>
+    <pre><code>&lt;/thinking&gt;
+1) I am roleplay director.
+2) story reflection
+&lt;thinking&gt;</code></pre>
+    <p>Bai Lian pauses mid-stroke.</p>
+  </div>
+
+  <!-- D: typo'd tags -->
+  <div class="msg" data-name="D: typo'd tags">
+    <div class="test-head"><b>D: typo'd tags (thinkng)</b><span class="result">expect: canonical tags</span></div>
+    <pre><code>&lt;thinkng&gt;
+1) I am roleplay director.
+&lt;/thinkng&gt;</code></pre>
+    <p>Shui Mei looks up, competitive fire banked.</p>
+  </div>
+
+  <!-- E: missing opener, loose escaped text (no pre) -->
+  <div class="msg" data-name="E: missing opener, loose text">
+    <div class="test-head"><b>E: missing opening tag, loose escaped text, no fence</b><span class="result">expect: wrapped in a block</span></div>
+    <p>1) I am roleplay director.<br>2) story reflection<br>&lt;/thinking&gt;</p>
+    <p>Tie Rou just shakes his head slowly.</p>
+  </div>
+
+  <!-- F: tags eaten as HTML elements (missing opening fence, parsed as elements) -->
+  <div class="msg" data-name="F: eaten tags as elements">
+    <div class="test-head"><b>F: tags parsed as HTML elements (missing opening fence)</b><span class="result">expect: wrapped in a block</span></div>
+    <thinking>1) I am roleplay director.
+2) story reflection</thinking>
+    <p>Huahua clutches the corrected talisman.</p>
+  </div>
+
+  <!-- G: not a thinking message -->
+  <div class="msg" data-name="G: normal message">
+    <div class="test-head"><b>G: normal message, no thinking</b><span class="result">expect: untouched</span></div>
+    <p>She smiles, the afternoon sun streaming through the crystalline ceiling.</p>
+  </div>
+</div>
+
+<script src="../fixer-core.js"></script>
+<script>
+(function () {
+  'use strict';
+  const results = [];
+  const fixtures = Array.from(document.querySelectorAll('.msg'));
+
+  function blockText(fx) {
+    const shell = fx.querySelector('.djtf-thinking');
+    if (!shell) return '';
+    const pre = shell.querySelector('pre') || shell;
+    return (pre.textContent || '').trim();
+  }
+
+  for (const fx of fixtures) {
+    const clone = fx.cloneNode(true);
+    const fixed = DJTFCore.repairMessage(fx, { collapse: true });
+    const text = blockText(fx);
+    const hasShell = !!fx.querySelector('.djtf-thinking');
+    const canonOpen = text.startsWith('<thinking>');
+    const canonClose = text.endsWith('</thinking>');
+    const respLifted = !!fx.querySelector('.djtf-response');
+    const bodyIntact = text.includes('1) I am roleplay director');
+    const untouched = fx.isEqualNode(clone);
+
+    let ok;
+    switch (fx.dataset.name[0]) {
+      case 'A': ok = !fixed && hasShell && canonOpen && canonClose && bodyIntact; break;
+      case 'B': ok = fixed === 1 && canonOpen && canonClose && bodyIntact && respLifted &&
+                     !!fx.querySelector('.djtf-response strong') &&           // **bold** rendered
+                     !!fx.querySelector('.djtf-response blockquote');          // > quote rendered
+      case 'C': ok = fixed === 1 && canonOpen && canonClose && bodyIntact; break;
+      case 'D': ok = fixed === 1 && canonOpen && canonClose && bodyIntact; break;
+      case 'E': ok = fixed === 1 && hasShell && canonOpen && canonClose && bodyIntact; break;
+      case 'F': ok = fixed === 1 && hasShell && canonOpen && canonClose && bodyIntact; break;
+      case 'G': ok = untouched; break;
+      default: ok = false;
+    }
+
+    results.push({ name: fx.dataset.name, ok, detail:
+      `fixed=${fixed} shell=${hasShell} open=${canonOpen} close=${canonClose} body=${bodyIntact} lifted=${respLifted} untouched=${untouched}` });
+  }
+
+  const out = document.getElementById('results');
+  const pass = results.filter(r => r.ok).length;
+  for (const r of results) {
+    const line = document.createElement('div');
+    line.className = r.ok ? 'ok' : 'bad';
+    line.textContent = `${r.ok ? 'PASS' : 'FAIL'}  ${r.name}  (${r.detail})`;
+    out.appendChild(line);
+  }
+  const summary = document.createElement('div');
+  summary.className = pass === results.length ? 'ok' : 'bad';
+  summary.style.marginTop = '8px';
+  summary.textContent = `${pass}/${results.length} fixtures pass`;
+  out.appendChild(summary);
+  console.log('DJTF_TEST_RESULT', pass, '/', results.length);
+})();
+</script>
+</body>
+</html>

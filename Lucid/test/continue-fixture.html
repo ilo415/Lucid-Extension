@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>DJ Thinking Fixer — empty-send continue pipeline test</title>
+<style>
+  body { background:#111; color:#e2e8f0; font-family:monospace; padding:20px; }
+  .ok { color:#34d399; } .bad { color:#f87171; }
+  #results { margin-top:12px; }
+  /* DJ's real composer is pinned to the bottom of the viewport — reproduce
+     that here so the disabled-send detection sees the composer zone. */
+  form.chatform {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    display: flex; gap: 8px;
+    padding: 12px;
+    background: #1a1a2e;
+    border-top: 1px solid rgba(255,255,255,0.1);
+  }
+  form.chatform textarea {
+    flex: 1;
+    background: #0d0d1a;
+    color: #e2e8f0;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    padding: 10px;
+    font-family: inherit;
+  }
+  form.chatform button {
+    width: 44px; height: 44px;
+    border-radius: 8px;
+    border: 1px solid rgba(139,92,246,0.4);
+    background: rgba(139,92,246,0.2);
+    color: #c4b5fd;
+    cursor: pointer;
+  }
+  form.chatform button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+</style>
+</head>
+<body>
+<h2>Empty-send continue pipeline test</h2>
+<div id="results"></div>
+
+<!-- Simulated DJ composer -->
+<form class="chatform">
+  <textarea class="submittextarea" placeholder="Message…"></textarea>
+  <button type="submit" disabled aria-label="Send message">
+    <svg class="lucide lucide-send-horizontal"><path d="M3 3l18 9-18 9 4-9z"/></svg>
+  </button>
+</form>
+
+<script>
+// ── chrome stub BEFORE content.js loads ──
+window.chrome = {
+  runtime: { onMessage: { addListener() {} }, lastError: undefined },
+  storage: {
+    local: {
+      _m: { djtfEnabled: true, djtfCollapse: true, djtfContinue: true },
+      get(keys, cb) { const r = {}; for (const k of keys) r[k] = this._m[k]; cb(r); },
+      set(obj, cb) { Object.assign(this._m, obj); cb && cb(); },
+    },
+  },
+};
+</script>
+<script src="../fixer-core.js"></script>
+<script src="../content.js"></script>
+
+<script>
+(function () {
+  'use strict';
+  const checks = [];
+  const results = document.getElementById('results');
+  let pass = 0;
+
+  function check(name, ok) {
+    if (ok) pass++;
+    const line = document.createElement('div');
+    line.className = ok ? 'ok' : 'bad';
+    line.textContent = (ok ? 'PASS ' : 'FAIL ') + name;
+    results.appendChild(line);
+    checks.push({ name, ok });
+  }
+
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  async function main() {
+    // Wait for content script to start + hook the composer.
+    await sleep(800);
+
+    // 1) Empty send button starts disabled (DJ behavior), extension enables it.
+    const form = document.querySelector('form.chatform');
+    const ta = form.querySelector('textarea.submittextarea');
+    const send = document.querySelector('svg.lucide-send-horizontal').closest('button');
+    check('composer form found', !!form);
+    check('textarea found', !!ta);
+    check('send button found', !!send);
+
+    // DJ renders the button disabled when empty — simulate that, then the
+    // safety interval / observer should enable it.
+    send.setAttribute('disabled', '');
+    await sleep(300);
+    check('empty send → extension enables button', !send.hasAttribute('disabled'));
+
+    // 2) mousedown on empty send injects ZWS.
+    ta.value = '';
+    send.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    await sleep(50);
+    check('mousedown injects ZWS into textarea', ta.value === '\u200B');
+
+    // 3) Submit fires with the ZWS value.
+    let submittedValue = null;
+    form.addEventListener('submit', (e) => { e.preventDefault(); submittedValue = ta.value; }, { once: true });
+    send.click();
+    await sleep(100);
+    check('submit carries ZWS value', submittedValue === '\u200B');
+
+    // 4) After submit, textarea restored to empty.
+    await sleep(500);
+    check('textarea restored to empty after submit', ta.value === '');
+
+    // 5) Simulate the ZWS bubble appearing + AI reply finishing: add a user
+    //    message group with the ZWS markdown, wait for the poll, and give it
+    //    a trash button to click.
+    const chat = document.querySelector('.scrollchatmessages') || (() => {
+      const c = document.createElement('div'); c.className = 'scrollchatmessages';
+      document.body.appendChild(c); return c;
+    })();
+    const bubble = document.createElement('div');
+    bubble.className = 'group';
+    bubble.setAttribute('data-sentry-component', 'ChatMessage');
+    bubble.innerHTML = '<div class="markdown">\u200B</div>' +
+      '<button type="button" aria-label="Delete message"><svg class="lucide lucide-trash2"><path d="M3 6h18"/></svg></button>';
+    bubble.querySelector('button').addEventListener('click', () => bubble.remove());
+    chat.appendChild(bubble);
+
+    // The extension polls every 800ms for the bubble then clicks delete.
+    await sleep(2500);
+    check('ZWS bubble was deleted (trash clicked)', !chat.contains(bubble));
+
+    // 6) Streaming signal preserved: a disabled send WITH text in the box
+    //    must still count as generating (auto-fix safety during streaming).
+    //    Re-disable the button with real content — the extension must NOT
+    //    force-enable it (that's an active generation).
+    ta.value = 'some typed message';
+    send.setAttribute('disabled', '');
+    await sleep(400);
+    check('disabled send + content → stays disabled (generating)', send.hasAttribute('disabled'));
+
+    const summary = document.createElement('div');
+    summary.className = pass === checks.length ? 'ok' : 'bad';
+    summary.textContent = `${pass}/${checks.length} checks pass`;
+    results.appendChild(summary);
+    console.log('DJTF_CONTINUE', pass, '/', checks.length);
+  }
+
+  main();
+})();
+</script>
+</body>
+</html>

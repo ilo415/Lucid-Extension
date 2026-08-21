@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>DJ Thinking Fixer — DJ-shape DOM pipeline test</title>
+<style>
+  body { background:#14141f; color:#e2e8f0; font-family: 'Segoe UI', sans-serif; padding: 20px; }
+  h1 { color:#c4b5fd; font-size: 18px; }
+  .scrollchatmessages { max-width: 760px; margin: 12px auto; }
+  .group { background:#1e1e30; border:1px solid #333; border-radius:12px; padding:12px 16px; margin:14px 0; }
+  .group pre { background:#0f0f1c; border:1px solid #2a2a44; border-radius:8px; padding:10px; white-space:pre-wrap; font-size:12px; color:#cbd5e1; }
+  .toolbar { display:flex; gap:6px; margin-top:10px; align-items:center; justify-content:space-between; }
+  .toolbar .lcluster { display:flex; gap:6px; align-items:center; }
+  .toolbar button { background:transparent; border:1px solid #333; border-radius:8px; padding:6px; cursor:pointer; color:#94a3b8; }
+  .toolbar button:hover { border-color:rgba(168,85,247,.5); color:#c4b5fd; }
+  .result { font-size:11px; margin-top:8px; color:#64748b; }
+  .ok { color:#34d399; } .bad { color:#f87171; }
+</style>
+</head>
+<body>
+<h1>🧠 DJ Thinking Fixer — real-DOM-shape pipeline test</h1>
+<p style="font-size:12px;color:#64748b">Uses David's exact toolbar button markup (aria-label="Edit assistant message" etc.) inside <code>.scrollchatmessages &gt; .group</code>, matching DJ's actual DOM. Tests <code>findCandidates → repairMessage</code> end to end.</p>
+
+<div id="results" style="font-size:13px;margin:10px 0;font-weight:600"></div>
+
+<div class="scrollchatmessages">
+
+  <!-- 1: MALFORMED — missing closing fence, response swallowed (assistant) -->
+  <div class="group">
+    <div class="markdown">
+      <pre><code>&lt;thinking&gt;
+1) I am roleplay director.
+2) story reflection
+&lt;/thinking&gt;
+
+**Huahua goes still.** She watches the brush move.
+
+&gt; The air hums with residual energy.</code></pre>
+    </div>
+    <div class="flex mx-0 gap-y-1 w-full justify-between">
+      <div class="lcluster">
+        <span>2 lore</span>
+        <button aria-label="Bookmark assistant message">🔖</button>
+      </div>
+      <div class="flex gap-2">
+        <button aria-label="Reroll assistant message">🔄</button>
+        <button class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background hover:bg-purple-800/50 hover:border border-purple-500/30 h-10 w-10 md:opacity-0 md:group-hover:opacity-100" type="button" aria-label="Edit assistant message"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.375 2.625a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4Z"/></svg></button>
+        <button aria-label="Copy assistant message">📋</button>
+        <button aria-label="Delete assistant message">🗑️</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2: MALFORMED — swapped tags (assistant) -->
+  <div class="group">
+    <div class="markdown">
+      <pre><code>&lt;/thinking&gt;
+1) I am roleplay director.
+2) story reflection
+&lt;thinking&gt;</code></pre>
+      <p>Bai Lian pauses mid-stroke.</p>
+    </div>
+    <div class="toolbar">
+      <button aria-label="Edit assistant message">✏️</button>
+    </div>
+  </div>
+
+  <!-- 3: WELL-FORMED — DJ native ThinkingProcess box, nothing to fix -->
+  <div class="group">
+    <div class="markdown">
+      <div data-sentry-element="ThinkingProcess">
+        <button aria-label="Show thinking process">Thinking Process</button>
+        <div>&lt;thinking&gt;
+1) I am roleplay director.
+&lt;/thinking&gt;</div>
+      </div>
+      <p>Shui Mei looks up, competitive fire banked.</p>
+    </div>
+    <div class="toolbar">
+      <button aria-label="Edit assistant message">✏️</button>
+    </div>
+  </div>
+
+  <!-- 4: USER message — must NOT be touched -->
+  <div class="group">
+    <div class="markdown">
+      <p>The user's own message text with an arbitrary &lt;thinking&gt; mention that should stay untouched.</p>
+    </div>
+    <div class="toolbar">
+      <button aria-label="Edit user message">✏️</button>
+    </div>
+  </div>
+
+  <!-- 5: assistant with NO thinking block — untouched -->
+  <div class="group">
+    <div class="markdown">
+      <p>Huahua clutches the corrected talisman, her expression saying everything her voice cannot.</p>
+    </div>
+    <div class="toolbar">
+      <button aria-label="Edit assistant message">✏️</button>
+    </div>
+  </div>
+
+  <!-- 6: [BRAIN]: glued before the fence — loose text + malformed block -->
+  <div class="group">
+    <div class="markdown">
+      [BRAIN]:```
+<thinking>
+1) I am roleplay director.
+2) story reflection
+</thinking>
+```
+      <p>Huahua blinks, clutching the brush.</p>
+    </div>
+    <div class="toolbar">
+      <button aria-label="Edit assistant message">✏️</button>
+    </div>
+  </div>
+
+  <!-- 7: [BRAIN] inside the thinking body -->
+  <div class="group">
+    <div class="markdown">
+      <pre><code>&lt;thinking&gt;
+[BRAIN]
+1) I am roleplay director.
+&lt;/thinking&gt;</code></pre>
+      <p>Bai Lian narrows his eyes.</p>
+    </div>
+    <div class="toolbar">
+      <button aria-label="Edit assistant message">✏️</button>
+    </div>
+  </div>
+
+  <!-- 8: NESTED — ThinkingProcess box whose content has a duplicated
+       opener + stray fence (David's `<thinking>\n```\n<thinking>` case).
+       Box exists but content is UNHEALTHY → must be flagged. -->
+  <div class="group">
+    <div class="markdown">
+      <div data-sentry-element="ThinkingProcess">
+        <button aria-label="Show thinking process">Thinking Process</button>
+        <div>&lt;thinking&gt;
+```
+&lt;thinking&gt;
+1) I am roleplay director.
+2) story reflection
+&lt;/thinking&gt;</div>
+      </div>
+      <p>Huahua stares at the brush.</p>
+    </div>
+    <div class="toolbar">
+      <button aria-label="Edit assistant message">✏️</button>
+    </div>
+  </div>
+
+  <!-- 10: TAGLESS — no thinking tags at all, pure SEER content pattern -->
+  <div class="group">
+    <div class="markdown">
+      <p>1) I am roleplay director.</p>
+      <p>2) "story reflection"</p>
+      <p>a) latest event: Nathan spoke softly.</p>
+      <p>3) "response idea generator"</p>
+      <p>a) rational idea: she reacts.</p>
+      <p>4) "writing plan"</p>
+      <p>c) i will start the synergized response below.</p>
+      <p>Huahua goes still.<br>Then she blushes.</p>
+    </div>
+    <div class="toolbar">
+      <button aria-label="Edit assistant message">✏️</button>
+    </div>
+  </div>
+
+  <!-- 11: CURLY QUOTES — healthy thinking block, but the reply body uses
+       smart quotes (“”) so DJ's dialogue highlighter breaks. Must be
+       flagged as a candidate and normalized. -->
+  <div class="group">
+    <div class="markdown">
+      <div data-sentry-element="ThinkingProcess">
+        <button aria-label="Show thinking process">Show thinking</button>
+        <div class="thinking-content"><thinking>1) plan
+2) write</thinking></div>
+      </div>
+      <p>“You feel so good,” he said, the words barely more than a whisper. “Always do.”</p>
+    </div>
+    <div class="toolbar">
+      <button aria-label="Edit assistant message">✏️</button>
+    </div>
+  </div>
+
+</div>
+
+<script src="../fixer-core.js"></script>
+<script>
+(function () {
+  'use strict';
+  const results = [];
+  const root = document.querySelector('.scrollchatmessages');
+  const candidates = DJTFCore.findCandidates(root);
+  let totalFixed = 0;
+  for (const c of candidates) {
+    totalFixed += DJTFCore.repairMessage(c, { collapse: true });
+  }
+
+  // Inspect results per message
+  const groups = Array.from(root.querySelectorAll(':scope > .group'));
+
+  function blockText(g) {
+    const shell = g.querySelector('.djtf-thinking');
+    if (!shell) return '';
+    const pre = shell.querySelector('pre') || shell;
+    return (pre.textContent || '').trim();
+  }
+
+  const checks = [];
+  const g1 = groups[0];
+  checks.push({ name: '1 missing-fence: repaired + response lifted',
+    ok: blockText(g1).startsWith('<thinking>') && g1.querySelector('.djtf-response strong') && g1.querySelector('.djtf-response blockquote') });
+
+  const g2 = groups[1];
+  checks.push({ name: '2 swapped tags: canonical',
+    ok: blockText(g2).startsWith('<thinking>') && blockText(g2).endsWith('</thinking>') });
+
+  const g3 = groups[2];
+  checks.push({ name: '3 well-formed ThinkingProcess box: untouched, skipped as native',
+    ok: !g3.querySelector('.djtf-thinking') && !!g3.querySelector('[data-sentry-element="ThinkingProcess"]') });
+
+  // hasNativeThinkingBox should flag fixture 3 as native (skip), others not.
+  checks.push({ name: 'hasNativeThinkingBox only on native box',
+    ok: DJTFCore.hasNativeThinkingBox(groups[2]) && !DJTFCore.hasNativeThinkingBox(groups[0]) });
+
+  const g4 = groups[3];
+  checks.push({ name: '4 user message: untouched',
+    ok: !g4.querySelector('.djtf-thinking') });
+
+  const g5 = groups[4];
+  checks.push({ name: '5 no-thinking assistant: untouched',
+    ok: !g5.querySelector('.djtf-thinking') });
+
+  const g6 = groups[5];
+  const g6text = blockText(g6);
+  checks.push({ name: '6 [BRAIN]: prefix → block fixed, marker gone',
+    ok: g6text.startsWith('<thinking>') && !g6text.includes('[BRAIN]') && !g6.querySelector('.markdown').innerText.includes('[BRAIN]') });
+
+  const g7 = groups[6];
+  checks.push({ name: '7 [BRAIN] in body → stripped, block fixed',
+    ok: blockText(g7).startsWith('<thinking>') && !blockText(g7).includes('[BRAIN]') });
+
+  const g8 = groups[7];
+  const g8wasCandidate = candidates.includes(g8);   // flagged BEFORE repair
+  const g8text = blockText(g8);                     // canonical AFTER repair
+  checks.push({ name: '8 nested ThinkingProcess box → flagged + fixed',
+    ok: g8wasCandidate && g8text.startsWith('<thinking>') && g8text.endsWith('</thinking>') &&
+        (g8text.match(/<thinking>/g) || []).length === 1 && !g8text.includes('```') });
+
+  // Fixtures in order: 1-8 (indices 0-7), tagless (index 8), curly (index 9).
+  const g9 = groups[8]; // (tagless fixture — no tags, no fences)
+  const g10 = groups[8];
+  const g10sig = DJTFCore.hasSignature(g10);
+  checks.push({ name: '10 tagless + fenceless → NOT a candidate (no reliable delimiters)',
+    ok: g10sig === false });
+  const g10rebuild = DJTFCore.rebuildMessageText('1) I am roleplay director.\n\n2) "story reflection"\na) latest event: X.\n\nHuahua goes still.');
+  checks.push({ name: '10 tagless + fenceless rebuild → null',
+    ok: g10rebuild === null });
+
+  const g11curly = groups[9];
+  checks.push({ name: '11 curly quotes → still a candidate',
+    ok: DJTFCore.hasSignature(g11curly) === true });
+
+  checks.push({ name: 'candidates found (expect 6)', ok: candidates.length === 6 });
+
+  const out = document.getElementById('results');
+  let pass = 0;
+  for (const c of checks) {
+    if (c.ok) pass++;
+    const line = document.createElement('div');
+    line.className = c.ok ? 'ok' : 'bad';
+    line.textContent = `${c.ok ? 'PASS' : 'FAIL'}  ${c.name}`;
+    out.appendChild(line);
+  }
+  const summary = document.createElement('div');
+  summary.className = pass === checks.length ? 'ok' : 'bad';
+  summary.textContent = `${pass}/${checks.length} checks pass (${totalFixed} blocks fixed)`;
+  out.appendChild(summary);
+  console.log('DJTF_PIPELINE', pass, '/', checks.length, 'fixed:', totalFixed);
+})();
+</script>
+</body>
+</html>
