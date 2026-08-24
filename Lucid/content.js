@@ -23,8 +23,33 @@
   }
 
   function saveState() {
-    chrome.storage.local.set({ djtfStats: stats, djtfContinue: continueEnabled });
-  }
+      chrome.storage.local.set({ djtfStats: stats, djtfContinue: continueEnabled });
+    }
+
+    // In-page toast (floats over the chat) for user-facing notices.
+    let toastTimer = null;
+    function showToast(msg) {
+      try {
+        let el = document.querySelector('[data-djtf-toast]');
+        if (!el) {
+          el = document.createElement('div');
+          el.setAttribute('data-djtf-toast', '1');
+          el.style.cssText = [
+            'position:fixed','bottom:90px','left:50%','transform:translateX(-50%)',
+            'z-index:99999','max-width:480px',
+            'background:rgba(19,19,34,.97)','border:1px solid rgba(245,158,11,.55)',
+            'color:#fbbf24','border-radius:10px','padding:10px 14px',
+            'box-shadow:0 8px 30px rgba(0,0,0,.5)','font-family:inherit','font-size:13px',
+            'line-height:1.4','text-align:center'
+          ].join(';');
+          document.body.appendChild(el);
+        }
+        el.textContent = msg;
+        el.style.display = 'block';
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => { try { el.style.display = 'none'; } catch (_) {} }, 6000);
+      } catch (_) {}
+    }
 
   function bumpStats(n) {
     stats.fixed += n;
@@ -107,11 +132,18 @@
           return;
         }
         const rebuilt = DJTFCore.rebuildMessageText(original);
-        if (!rebuilt) {
-          closeDialog(dialog);
-          resolve({ fixed: 0, via: 'no-repair-needed' });
-          return;
-        }
+                if (rebuilt && rebuilt.ambiguous) {
+                  // Can't determine where thinking ends / story begins. DON'T save
+                  // (we'd hide the user's reply inside the block). Leave the dialog
+                  // open so the user can hand-edit, and report it as ambiguous.
+                  resolve({ fixed: 0, via: 'ambiguous' });
+                  return;
+                }
+                if (!rebuilt) {
+                  closeDialog(dialog);
+                  resolve({ fixed: 0, via: 'no-repair-needed' });
+                  return;
+                }
         const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
         setter.call(textarea, rebuilt.text);
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
@@ -250,31 +282,41 @@
         if (r && r.height > 4 && r.width > 4) px = Math.min(r.height, r.width);
       }
       const btn = buildFixBtn(px);
-            btn.addEventListener('click', async (e) => {
-              // Async closure: if the extension context is invalidated mid-flight
-              // (reload, page teardown), the awaited work rejects as an uncaught
-              // promise. Swallow that so it can't surface in the Errors panel.
-              try {
-                e.stopPropagation();
-                btn.disabled = true;
-                btn.style.opacity = '.6';
-                const res = await fixViaDialog(g);
-                if (res.fixed) {
-                  bumpStats(res.fixed);
-                  btn.style.background = 'rgba(5,150,105,.2)'; btn.style.color = '#6ee7b7'; btn.style.borderColor = 'rgba(52,211,153,.4)';
-                  btn.title = 'Fixed ✓';
-                } else if (res.via === 'no-repair-needed') {
-                  btn.style.background = 'rgba(82,82,91,.2)'; btn.style.color = '#a1a1aa'; btn.style.borderColor = 'rgba(113,113,122,.3)';
-                  btn.title = 'Looks clean ✔';
-                }
-                // Timeout / no-edit-btn: stay purple so the user can retry.
-              } catch (_) { /* extension context invalidated / page gone — give up quietly */ }
-              try {
-                btn.style.opacity = '1';
-                btn.disabled = false;
-                setTimeout(() => { btn.style.background = 'transparent'; btn.style.color = '#94a3b8'; btn.style.borderColor = 'transparent'; btn.title = 'Check / fix thinking block'; }, 1500);
-              } catch (_) {}
-            });
+                  btn.addEventListener('click', async (e) => {
+                    // Async closure: if the extension context is invalidated mid-flight
+                    // (reload, page teardown), the awaited work rejects as an uncaught
+                    // promise. Swallow that so it can't surface in the Errors panel.
+                    try {
+                      e.stopPropagation();
+                      btn.disabled = true;
+                      btn.style.opacity = '.6';
+                      const res = await fixViaDialog(g);
+                      if (res.fixed) {
+                        bumpStats(res.fixed);
+                        btn.style.background = 'rgba(5,150,105,.2)'; btn.style.color = '#6ee7b7'; btn.style.borderColor = 'rgba(52,211,153,.4)';
+                        btn.title = 'Fixed ✓';
+                      } else if (res.via === 'ambiguous') {
+                        // Can't tell where thinking ends / prose begins. The edit
+                        // dialog stays OPEN so the user can hand-place </thinking>.
+                        // Surface a clear notice + leave the button amber.
+                        btn.style.background = 'rgba(245,158,11,.18)'; btn.style.color = '#fbbf24'; btn.style.borderColor = 'rgba(245,158,11,.45)';
+                        btn.title = 'Can\u2019t find reply start \u2014 fix manually or reroll';
+                        showToast('⚠️ Lucid couldn\u2019t find where the reply starts. Fix </thinking> in the open editor, or reroll the message.');
+                      } else if (res.via === 'no-repair-needed') {
+                        btn.style.background = 'rgba(82,82,91,.2)'; btn.style.color = '#a1a1aa'; btn.style.borderColor = 'rgba(113,113,122,.3)';
+                        btn.title = 'Looks clean ✔';
+                      }
+                      // Timeout / no-edit-btn: stay purple so the user can retry.
+                    } catch (_) { /* extension context invalidated / page gone — give up quietly */ }
+                    try {
+                      btn.style.opacity = '1';
+                      btn.disabled = false;
+                      // Amber ambiguous state persists longer (user needs to act).
+                                            if (btn.title.indexOf('Can\u2019t find reply start') === -1) {
+                        setTimeout(() => { btn.style.background = 'transparent'; btn.style.color = '#94a3b8'; btn.style.borderColor = 'transparent'; btn.title = 'Check / fix thinking block'; }, 1500);
+                      }
+                    } catch (_) {}
+                  });
       // Place right AFTER the bookmark button so they sit together and align.
       if (bookmark && bookmark.parentNode === cluster) {
         cluster.insertBefore(btn, bookmark.nextSibling);

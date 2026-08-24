@@ -704,5 +704,48 @@ function check(name, actual, expected) {
   check(`26 catalog matrix complete (${catalog} combos, ${catalogFail} failures)`, catalogFail === 0, true);
 }
 
+// ── 27. No-closer boundary: structure shift & ambiguous flag ──
+{
+  const c = require('../fixer-core.js');
+
+  // Thinking lists → sustained prose shift: split at the prose (reply saved).
+  const split = c.rebuildMessageText(
+    '<thinking>\n1) I am roleplay director.\n2) story reflection\n\nShe stepped into the chamber, torchlight flickering across the worn stone.\nThe old man did not look up. He kept carving, knife scraping slow.\n"Leave the scroll," he said finally.'
+  );
+  check('27 no-closer + structure shift → rebuilt', !!split, true);
+  check('27 split keeps prose OUT of block',
+    split ? (split.text.indexOf('She stepped into') > split.text.indexOf('</thinking>')) : false, true);
+  check('27 split: reply preserved as rest',
+    split ? split.text.includes('She stepped into') && split.text.includes('Leave the scroll') : false, true);
+
+  // ALL-thinking (no prose at all): no reply to lose → close at end. Safe.
+  const allThink = c.rebuildMessageText('<thinking>\n1) plan\n2) write\n3) edit');
+  check('27 list-only no closer → repaired (closes at end)', !!allThink, true);
+  check('27 list-only → NOT ambiguous', !(allThink && allThink.ambiguous), true);
+  check('27 list-only → closer at end', allThink ? allThink.text.includes('3) edit\n</thinking>') : false, true);
+
+  // Ambiguous: prose present but no sustained structural shift → flag.
+  // Case A: thinking lines then one LONG prose line, no bulge → ambiguous
+  // (a single prose line with no sustained run behind it is unreliable).
+  const ambA = c.rebuildMessageText('<thinking>\n1) plan\n2) write\nShe glanced up at him across the table, waiting for an answer that was slow in coming.');
+  check('27 single long prose line, no bulge → ambiguous', !!(ambA && ambA.ambiguous), true);
+  check('27 ambiguous → NOT repaired (nothing saved)', ambA ? !ambA.repaired : false, true);
+  // Short prose-like tail (<30 chars) is treated as thinking-body noise, so a
+  // tiny tagline gets absorbed rather than hiding a guessable reply.
+  const shortTail = c.rebuildMessageText('<thinking>\n1) plan\n2) write\nShe glanced up.');
+  check('27 short prose tail (<30 chars) → absorbed, no ambiguity', !!shortTail && !shortTail.ambiguous, true);
+
+  // A prose bulge of exactly the threshold (2+ following prose lines) → split.
+  const bulge = c.rebuildMessageText('<thinking>\nSTEP 1: plan the approach\nSTEP 2: write the scene carefully\nShe walked across the room and stopped by the window, watching the rain.\n"Hey," she said, arms folded across her chest, waiting.\nHe shrugged and finally turned to face her, saying nothing at all.');
+  check('27 prose bulge (3 lines) → split', !!bulge && !bulge.ambiguous, true);
+  check('27 bulge response preserved', bulge ? bulge.text.includes('"Hey," she said') : false, true);
+  check('27 bulge closer before prose', bulge ? bulge.text.indexOf('</thinking>') < bulge.text.indexOf('She walked across') : false, true);
+
+  // Ambiguous when text after opener is prose with no list/header structure
+  // at all (pure unstructured story) — can't separate thinking from story.
+  const ambB = c.rebuildMessageText('<thinking>\nShe walked over and sat beside him.\nThe fire crackled.\nHe said nothing for a long moment.');
+  check('27 unstructured prose, no fix → ambiguous', !!(ambB && ambB.ambiguous), true);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

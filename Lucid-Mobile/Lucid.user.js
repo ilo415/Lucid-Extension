@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lucid (Mobile)
 // @namespace    lucid-mobile
-// @version      1.4.0
+// @version      1.5.0
 // @description  Mends DreamJourney thinking blocks on phones: broken fences, missing/swapped/typo'd thinking tags, plus a per-message fix button and empty-send continue. Desktop-extension logic bundled as a user script.
 // @author       Nyveria
 // @match        https://dreamjourneyai.com/app/*
@@ -129,37 +129,93 @@
   // falls through as "nothing to fix."
 
   // Find where the actual reply begins after a thinking block that has no
-  // closing tag. The only reliable, format-agnostic boundary is a fence-only
-  // line AFTER real content — the block's closing fence when the </thinking>
-  // tag is missing. (A fence right after <thinking> is a stray opener-fence,
-  // not a boundary.) Anything else (CAS headers, director markers, system
-  // prompt conventions) is per-user musing and is deliberately NOT used —
-  // see the SEER/CAS removals.
-  // Returns the index of the boundary, or -1 if none found.
-  function findReplyBoundary(text, from) {
-    if (!text || from == null) return -1;
-    const slice = text.slice(from);
+    // closing tag. Boundaries, in order of reliability:
+    //   1. A fence-only line AFTER real content — the block's closing fence
+    //      (a fence right after <thinking> is a stray opener-fence, NOT one).
+    //   2. A STRUCTURE SHIFT: thinking blocks are dense list/header text
+    //      ("1) …", "a) …", "- …", "STEP 1:", "DECISION:") while the reply is
+    //      continuous prose. The first prose-like line that starts a sustained
+    //      run (>=2 following prose lines, or a prose bulge) marks the story
+    //      beginning. This is format-based — generic to every set-up, unlike
+    //      user prompt conventions (SEER/CAS) which are deliberately NOT used.
+    // Returns the index of the boundary, or -1 if none found.
+    function findReplyBoundary(text, from) {
+      if (!text || from == null) return -1;
+      const slice = text.slice(from);
 
-    // Closing fence: first fence-only line after at least one content line.
-    const lines = slice.split('\n');
-    let seenContent = false;
-    let acc = from;
-    for (const line of lines) {
-      const isFence = /^\s*```+\s*$/.test(line);
-      const isBlank = line.trim() === '';
-      if (isFence) {
-        if (seenContent) return acc; // fence closes the block — boundary here
-        // stray opener-fence: skip, keep scanning
-      } else if (!isBlank) {
-        seenContent = true;
+      // 1) Closing fence.
+      const lines = slice.split('\n');
+      let seenContent = false;
+      let acc = from;
+      for (const line of lines) {
+        const isFence = /^\s*```+\s*$/.test(line);
+        const isBlank = line.trim() === '';
+        if (isFence) {
+          if (seenContent) return acc;
+        } else if (!isBlank) {
+          seenContent = true;
+        }
+        acc += line.length + 1;
       }
-      acc += line.length + 1;
+
+      // 2) Structure shift — first prose line that starts a sustained prose run.
+            return findProseBoundary(slice, from);
     }
 
-    // No CAS / director / system-prompt convention is used as a boundary —
-    // those are per-user and unreliable for other people's RPs.
-    return -1;
-  }
+    // Is this a "thinking-style" line — list item, ALL-CAPS/Title-case header
+    // ending in a colon, or a short directive ("Write…", "Don't…")?
+    function isThinkingStyleLine(line) {
+      const t = line.trim();
+      if (!t) return true; // blank lines belong to the block
+      // list markers: "1)", "12)", "a)", "b)", "- ", "* ", "• "
+      if (/^(\d+[.)]|[a-z][.)]|\*\s|-\s|•\s)/i.test(t)) return true;
+      // header: "STEP 1: plan…", "DECISION: go", "IMPORTANT:…", "a) writing: …"
+            if (/^[A-Z][A-Za-z0-9 _/-]{0,24}:/.test(t)) return true;
+      // short directive: "Write it…", "Avoid…", "Don't…", "Keep it…"
+      if (t.length < 60 && /^(write|avoid|don't|do not|keep|use|remember|make|start|end|vary|show|focus|imagine|you are|i am)\b/i.test(t)) return true;
+      return false;
+    }
+
+    // Is this a story-style (prose) line — starts with a capital, reads as a
+    // normal sentence, not a list/header/directive?
+    function isProseLine(line) {
+      const t = line.trim();
+      if (!t) return false;
+      if (isThinkingStyleLine(t)) return false;
+      // Not list/header; must start with a capital or quote and be a normal
+      // > 40-char sentence-length run.
+      if (!/^[A-Z"“']/.test(t)) return false;
+      if (t.length < 30) return false;       // too short to be a paragraph start
+      return true;
+    }
+
+    // Scan for the first prose line that begins (or is followed by) a sustained
+        // prose run — the "story bulge." Returns absolute offset, or -1.
+        function findProseBoundary(slice, baseFrom) {
+          const lines = slice.split('\n');
+          let acc = baseFrom;
+          for (let i = 0; i < lines.length; i++) {
+            const t = lines[i].trim();
+            if (!t) { acc += lines[i].length + 1; continue; }
+            if (isProseLine(lines[i])) {
+              // look ahead: count CONSECUTIVE non-thinking non-blank lines (the
+              // story run). Short dialogue lines are story too — don't break the
+              // run on them. A >= 2-line run proves prose, not a stray example.
+              let proseNext = 0;
+              for (let j = i + 1; j < lines.length; j++) {
+                const n = lines[j].trim();
+                if (!n) continue;
+                if (isThinkingStyleLine(n)) break;   // back to list/header = block
+                proseNext++;                          // story line (any length)
+              }
+              if (proseNext >= 2) return acc;
+              // Single prose line but long (a whole paragraph on one line) counts.
+              if (lines[i].length >= 200) return acc;
+            }
+            acc += lines[i].length + 1;
+          }
+          return -1;
+        }
 
   const TAG_RE = /<\s*\/?\s*([A-Za-z]{2,24})\s*>/g;
 
@@ -239,19 +295,50 @@
       restStart = tags[closeIdx].index + tags[closeIdx].len;
       repaired = true;
     } else if (closeIdx === -1) {
-      // No closer — body starts after the opening tag. Without a closer and
-      // without a closing fence to mark the boundary, the reply is
-      // indistinguishable from the thinking body, so the whole rest is
-      // treated as thinking (honest fallback). Only a closing fence line can
-      // separate reply from thinking — no per-user conventions (CAS, SEER,
-      // director markers) are used as boundaries.
-      bodyStart = tags[openIdx].index + tags[openIdx].len;
-      let boundary = findReplyBoundary(text, bodyStart);
-      if (boundary === -1) boundary = text.length;
-      bodyEnd = boundary;
-      restStart = boundary;
-      repaired = true;
-    } else if (tags[closeIdx].index < tags[openIdx].index) {
+          // No closer — body starts after the opening tag. Without a closer we
+          // look for a boundary: a closing fence line, or a STRUCTURE SHIFT into
+          // sustained prose (the story). If neither exists, the reply is
+          // indistinguishable from the thinking body — do NOT silently absorb it
+          // into the block (that hides the user's roleplay). Instead flag it
+          // ambiguous so the UI can tell the user to hand-fix or reroll.
+          bodyStart = tags[openIdx].index + tags[openIdx].len;
+                    const boundary = findReplyBoundary(text, bodyStart);
+                    if (boundary === -1) {
+                      // No fence and no structure shift. If the rest is ALL
+                      // thinking-style lines (no prose at all), there's no reply in here
+                      // to lose — safely close the block at the end.
+                      const restText = text.slice(bodyStart);
+                      let hasProse = false;
+                      for (const line of restText.split('\n')) {
+                        if (line.trim() && isProseLine(line)) { hasProse = true; break; }
+                      }
+                      if (!hasProse) {
+                        bodyEnd = text.length;
+                        restStart = text.length;
+                        repaired = true;
+                      } else {
+                        // Prose IS present but no sustained shift → genuinely can't tell
+                        // where thinking ends. Don't hide the reply: flag ambiguous.
+                        return { ambiguous: true, repaired: false, reason: 'no-closer-no-boundary' };
+                      }
+                    } else {
+                                          bodyEnd = boundary;
+                                          restStart = boundary;
+                                          // The shift only counts if there were actual thinking-style
+                                          // lines BEFORE the prose — otherwise this isn't a thinking
+                                          // block with a reply, it's just prose after a stray <thinking>
+                                          // (ambiguous).
+                                          const pre = text.slice(bodyStart, boundary);
+                                          let hasThinkingLine = false;
+                                          for (const line of pre.split('\n')) {
+                                            if (line.trim() && isThinkingStyleLine(line)) { hasThinkingLine = true; break; }
+                                          }
+                                          if (!hasThinkingLine) {
+                                            return { ambiguous: true, repaired: false, reason: 'no-closer-no-thinking-lines' };
+                                          }
+                                          repaired = true;
+                                        }
+        } else if (tags[closeIdx].index < tags[openIdx].index) {
       // Closing appears BEFORE opening — the "swapped" case. Treat the
       // text between the misplaced closer and the opener as the body and
       // anything after the opener as the response.
@@ -424,13 +511,19 @@
         // fall through → normalize will flag and strip the duplicates
       }
     const norm = normalizeThinkingBlock(text);
-    if (!norm || !norm.repaired) {
-      // Thinking block is fine but quotes are bad → purely a quote cleanup.
-      if (quotesBad) {
-        return { text: normalizeQuotes(text), norm: null, quotesFixed: true };
-      }
-      return null;
-    }
+        // Ambiguous: a missing closer with no detectable boundary (no fence, no
+        // structure shift). We can't safely split thinking from story — surface
+        // this to the user instead of silently absorbing the reply into the block.
+        if (norm && norm.ambiguous) {
+          return { ambiguous: true, norm, quotesFixed: quotesBad };
+        }
+        if (!norm || !norm.repaired) {
+          // Thinking block is fine but quotes are bad → purely a quote cleanup.
+          if (quotesBad) {
+            return { text: normalizeQuotes(text), norm: null, quotesFixed: true };
+          }
+          return null;
+        }
     const fenced = '```\n' + norm.thinking + '\n```';
     const rest = norm.rest ? '\n\n' + norm.rest : '';
     let out = fenced + rest;
@@ -768,8 +861,33 @@
   }
 
   function saveState() {
-    chrome.storage.local.set({ djtfStats: stats, djtfContinue: continueEnabled });
-  }
+      chrome.storage.local.set({ djtfStats: stats, djtfContinue: continueEnabled });
+    }
+
+    // In-page toast (floats over the chat) for user-facing notices.
+    let toastTimer = null;
+    function showToast(msg) {
+      try {
+        let el = document.querySelector('[data-djtf-toast]');
+        if (!el) {
+          el = document.createElement('div');
+          el.setAttribute('data-djtf-toast', '1');
+          el.style.cssText = [
+            'position:fixed','bottom:90px','left:50%','transform:translateX(-50%)',
+            'z-index:99999','max-width:480px',
+            'background:rgba(19,19,34,.97)','border:1px solid rgba(245,158,11,.55)',
+            'color:#fbbf24','border-radius:10px','padding:10px 14px',
+            'box-shadow:0 8px 30px rgba(0,0,0,.5)','font-family:inherit','font-size:13px',
+            'line-height:1.4','text-align:center'
+          ].join(';');
+          document.body.appendChild(el);
+        }
+        el.textContent = msg;
+        el.style.display = 'block';
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => { try { el.style.display = 'none'; } catch (_) {} }, 6000);
+      } catch (_) {}
+    }
 
   function bumpStats(n) {
     stats.fixed += n;
@@ -852,11 +970,18 @@
           return;
         }
         const rebuilt = DJTFCore.rebuildMessageText(original);
-        if (!rebuilt) {
-          closeDialog(dialog);
-          resolve({ fixed: 0, via: 'no-repair-needed' });
-          return;
-        }
+                if (rebuilt && rebuilt.ambiguous) {
+                  // Can't determine where thinking ends / story begins. DON'T save
+                  // (we'd hide the user's reply inside the block). Leave the dialog
+                  // open so the user can hand-edit, and report it as ambiguous.
+                  resolve({ fixed: 0, via: 'ambiguous' });
+                  return;
+                }
+                if (!rebuilt) {
+                  closeDialog(dialog);
+                  resolve({ fixed: 0, via: 'no-repair-needed' });
+                  return;
+                }
         const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
         setter.call(textarea, rebuilt.text);
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
@@ -995,31 +1120,41 @@
         if (r && r.height > 4 && r.width > 4) px = Math.min(r.height, r.width);
       }
       const btn = buildFixBtn(px);
-            btn.addEventListener('click', async (e) => {
-              // Async closure: if the extension context is invalidated mid-flight
-              // (reload, page teardown), the awaited work rejects as an uncaught
-              // promise. Swallow that so it can't surface in the Errors panel.
-              try {
-                e.stopPropagation();
-                btn.disabled = true;
-                btn.style.opacity = '.6';
-                const res = await fixViaDialog(g);
-                if (res.fixed) {
-                  bumpStats(res.fixed);
-                  btn.style.background = 'rgba(5,150,105,.2)'; btn.style.color = '#6ee7b7'; btn.style.borderColor = 'rgba(52,211,153,.4)';
-                  btn.title = 'Fixed ✓';
-                } else if (res.via === 'no-repair-needed') {
-                  btn.style.background = 'rgba(82,82,91,.2)'; btn.style.color = '#a1a1aa'; btn.style.borderColor = 'rgba(113,113,122,.3)';
-                  btn.title = 'Looks clean ✔';
-                }
-                // Timeout / no-edit-btn: stay purple so the user can retry.
-              } catch (_) { /* extension context invalidated / page gone — give up quietly */ }
-              try {
-                btn.style.opacity = '1';
-                btn.disabled = false;
-                setTimeout(() => { btn.style.background = 'transparent'; btn.style.color = '#94a3b8'; btn.style.borderColor = 'transparent'; btn.title = 'Check / fix thinking block'; }, 1500);
-              } catch (_) {}
-            });
+                  btn.addEventListener('click', async (e) => {
+                    // Async closure: if the extension context is invalidated mid-flight
+                    // (reload, page teardown), the awaited work rejects as an uncaught
+                    // promise. Swallow that so it can't surface in the Errors panel.
+                    try {
+                      e.stopPropagation();
+                      btn.disabled = true;
+                      btn.style.opacity = '.6';
+                      const res = await fixViaDialog(g);
+                      if (res.fixed) {
+                        bumpStats(res.fixed);
+                        btn.style.background = 'rgba(5,150,105,.2)'; btn.style.color = '#6ee7b7'; btn.style.borderColor = 'rgba(52,211,153,.4)';
+                        btn.title = 'Fixed ✓';
+                      } else if (res.via === 'ambiguous') {
+                        // Can't tell where thinking ends / prose begins. The edit
+                        // dialog stays OPEN so the user can hand-place </thinking>.
+                        // Surface a clear notice + leave the button amber.
+                        btn.style.background = 'rgba(245,158,11,.18)'; btn.style.color = '#fbbf24'; btn.style.borderColor = 'rgba(245,158,11,.45)';
+                        btn.title = 'Can\u2019t find reply start \u2014 fix manually or reroll';
+                        showToast('⚠️ Lucid couldn\u2019t find where the reply starts. Fix </thinking> in the open editor, or reroll the message.');
+                      } else if (res.via === 'no-repair-needed') {
+                        btn.style.background = 'rgba(82,82,91,.2)'; btn.style.color = '#a1a1aa'; btn.style.borderColor = 'rgba(113,113,122,.3)';
+                        btn.title = 'Looks clean ✔';
+                      }
+                      // Timeout / no-edit-btn: stay purple so the user can retry.
+                    } catch (_) { /* extension context invalidated / page gone — give up quietly */ }
+                    try {
+                      btn.style.opacity = '1';
+                      btn.disabled = false;
+                      // Amber ambiguous state persists longer (user needs to act).
+                                            if (btn.title.indexOf('Can\u2019t find reply start') === -1) {
+                        setTimeout(() => { btn.style.background = 'transparent'; btn.style.color = '#94a3b8'; btn.style.borderColor = 'transparent'; btn.title = 'Check / fix thinking block'; }, 1500);
+                      }
+                    } catch (_) {}
+                  });
       // Place right AFTER the bookmark button so they sit together and align.
       if (bookmark && bookmark.parentNode === cluster) {
         cluster.insertBefore(btn, bookmark.nextSibling);

@@ -49,6 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (resp?.ok) {
       if (resp.fixed) flash(`Fixed ${resp.fixed} thinking block(s) ✓`);
       else if (resp.via === 'no-dialog') flash('Scanned — fix buttons injected');
+      else if (resp.via === 'ambiguous') flash('Couldn\u2019t find reply start — edit or reroll', '#fbbf24');
       else flash('That message looks clean');
     } else {
       flash('Open the chat page first', '#f87171');
