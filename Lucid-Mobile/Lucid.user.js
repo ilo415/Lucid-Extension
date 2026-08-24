@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lucid (Mobile)
 // @namespace    lucid-mobile
-// @version      1.3.0
+// @version      1.4.0
 // @description  Mends DreamJourney thinking blocks on phones: broken fences, missing/swapped/typo'd thinking tags, plus a per-message fix button and empty-send continue. Desktop-extension logic bundled as a user script.
 // @author       Nyveria
 // @match        https://dreamjourneyai.com/app/*
@@ -292,30 +292,36 @@
     body = body.replace(/```+/g, '');
 
     // Region before the opening tag's own position — should only be a fence.
-    const beforeOpen = openIdx !== -1 ? text.slice(0, tags[openIdx].index) : '';
-    const leading = beforeOpen.replace(/^\s*```+\s*\n?/, '').replace(BRAIN_RE, '').trim();
-    let rest = text.slice(restStart);
-    rest = rest.replace(/^\s*```+\s*\n?/, '').replace(BRAIN_RE, '').replace(/\s+$/, '');
+        const beforeOpen = openIdx !== -1 ? text.slice(0, tags[openIdx].index) : '';
+        const leading = beforeOpen.replace(/^\s*```+\s*\n?/, '').replace(BRAIN_RE, '').trim();
+        // Everything after the closing tag — keep the raw form so we can tell a
+        // real closing fence apart from "nothing at all" (both used to collapse
+        // to '' after stripping, which is how a missing closer slipped through).
+        const rawRest = text.slice(restStart);
+        const hasCloseFence = /^\s*```+\s*(\n|$)/.test(rawRest);
+        let rest = rawRest.replace(/^\s*```+\s*\n?/, '').replace(BRAIN_RE, '').replace(/\s+$/, '');
 
-    const thinking = '<thinking>\n' + body.replace(/^\s+|\s+$/g, '') + '\n</thinking>';
+        const thinking = '<thinking>\n' + body.replace(/^\s+|\s+$/g, '') + '\n</thinking>';
 
-    // Already well-formed: opener at the very start with an opening fence
-    // before it, closer at the very end, non-empty body, nothing left over.
-    // (The opening fence is what makes it a ThinkingProcess on DJ — without
-    // it, the bare tags render as visible text. So require a fence here.)
-    const hasOpenFence = openIdx !== -1 && /```/.test(text.slice(0, tags[openIdx].index));
-    if (!repaired && hasOpenFence && leading === '' && rest.trim() === '' && body.trim() !== '') {
-      return { thinking, rest: '', repaired: false };
-    }
-    // Well-ordered clean tags but NO opening fence — DJ renders a bare
-    // <thinking> as visible text (an unknown HTML element), NOT a collapsible
-    // ThinkingProcess. Add the fence wrapper. Every other fence position
-    // already went through the branch above and set repaired=true; this
-    // catches only the fully-unfenced case (the model omitted the ```).
-    if (!repaired && !hasOpenFence && openIdx !== -1 && closeIdx !== -1) {
-      repaired = true;
-    }
-    return { thinking, rest, repaired: true };
+        // Well-formed ONLY when BOTH fence wrappers are present: an opening fence
+        // in front of <thinking> and a closing fence right after </thinking>.
+        // A block with only one of the two — e.g. a fused "```<thinking>" with no
+        // closing fence — is broken on DJ (the fence is never closed, so it
+        // renders as literal text, never a collapsible ThinkingProcess).
+        // Tolerated positions: fence glued to the tag OR on its own line
+        // (both are the canonical shapes DJ emits).
+        const hasOpenFence = openIdx !== -1 && /```/.test(text.slice(0, tags[openIdx].index));
+        const fenced = hasOpenFence && hasCloseFence;
+        if (!repaired && fenced && leading === '' && rest.trim() === '' && body.trim() !== '') {
+          return { thinking, rest: '', repaired: false };
+        }
+        // Well-ordered clean tags but the wrapper is incomplete (missing opening
+        // OR closing fence) — DJ renders bare/incomplete blocks as visible text.
+        // Rebuild with a complete fence wrapper.
+        if (!repaired && openIdx !== -1 && closeIdx !== -1 && !fenced) {
+          repaired = true;
+        }
+        return { thinking, rest, repaired: true };
   }
 
   // ── Escape + minimal markdown (for response text rescued from a
@@ -399,16 +405,24 @@
   }
 
   function rebuildMessageText(text) {
-    if (!text) return null;
-    const quotesBad = hasCurlyQuotes(text);
-    // Already canonical: opening fence, clean <thinking>, body with NO stray
-    // fences inside, </thinking>, closing fence (anything after that is the
-    // normal response). The tempered dot (?:(?!```)[\s\S])*? refuses to cross
-    // any ``` inside the body, so "<thinking>\n```\nbody</thinking>" is NOT
-    // treated as canonical. Still rebuilds when the response carries curly
-    // quotes — the dialogue-highlight fix applies even to healthy blocks.
-    const canonical = /^\s*```+\s*\n?\s*<thinking>(?:(?!```)[\s\S])*?<\/thinking>\s*```+/.test(text);
-    if (canonical && !quotesBad) return null;
+      if (!text) return null;
+      const quotesBad = hasCurlyQuotes(text);
+      // Already canonical: opening fence, clean <thinking>, body with NO stray
+      // fences inside, </thinking>, closing fence (anything after that is the
+      // normal response). The tempered dot (?:(?!```)[\s\S])*? refuses to cross
+      // any ``` inside the body, so "<thinking>\n```\nbody</thinking>" is NOT
+      // treated as canonical. Still rebuilds when the response carries curly
+      // quotes — the dialogue-highlight fix applies even to healthy blocks.
+      const canonicalShape = /^\s*```+\s*\n?\s*<thinking>(?:(?!```)[\s\S])*?<\/thinking>\s*```+/.test(text);
+      if (canonicalShape && !quotesBad) {
+        // The shape regex is lazy and happily matches DUPLICATE open/close tags
+        // inside the block (it only refuses fences). A block with extra tags is
+        // still malformed — fall through so normalizeThinkingBlock fixes it.
+        const opens = (text.match(/<thinking>/g) || []).length;
+        const closes = (text.match(/<\/thinking>/g) || []).length;
+        if (opens === 1 && closes === 1) return null;
+        // fall through → normalize will flag and strip the duplicates
+      }
     const norm = normalizeThinkingBlock(text);
     if (!norm || !norm.repaired) {
       // Thinking block is fine but quotes are bad → purely a quote cleanup.

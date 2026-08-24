@@ -261,7 +261,7 @@ function check(name, actual, expected) {
   const cases = [
     // [name, raw, expectRebuild]
     ['no fences', `<thinking>\n${BODY}\n</thinking>`, true],
-    ['fence before opener', '```\n<thinking>\n' + BODY + '\n</thinking>', false],
+    ['fence before opener', '```\n<thinking>\n' + BODY + '\n</thinking>', true],
     ['fence after closer', `<thinking>\n${BODY}\n</thinking>\n\`\`\``, true],
     ['both outside', '```\n<thinking>\n' + BODY + '\n</thinking>\n```', false],
     ['fence after opener', `<thinking>\n\`\`\`\n${BODY}\n</thinking>`, true],
@@ -629,6 +629,79 @@ function check(name, actual, expected) {
   check('25 tagless fused fence → rebuilt', !!fusedTagless, true);
   check('25 tagless fused fence removed', fusedTagless ? !/```[A-Za-z]/.test(fusedTagless.text) : false, true);
   check('25 tagless response preserved', fusedTagless?.text.includes('Huahua reacts.'), true);
+}
+
+// ── 26. FULL CATALOG: every tag state × every fence placement ──
+// The user asked for the complete matrix, not just the examples seen so far.
+// Tag states: both, missing opener, missing closer, both missing, swapped,
+// dup opener, dup closer, typo opener, typo closer.
+// Fence placements: none, open glued/own-line, close glued/own-line, both
+// (all glued/own-line combos).
+// Canonical = tags well-ordered + BOTH fence wrappers present. Everything
+// else must rebuild into a canonical block with the body preserved.
+{
+  const c = require('../fixer-core.js');
+  const B = '1) plan\n2) write';
+  const T = '<thinking>', TC = '</thinking>';
+
+  const tagStates = {
+    both:        () => `${T}\n${B}\n${TC}`,
+    noOpen:      () => `${B}\n${TC}`,
+    noClose:     () => `${T}\n${B}`,
+    noBoth:      () => `${B}`,
+    swapped:     () => `${TC}\n${B}\n${T}`,
+    dupOpen:     () => `${T}\n${T}\n${B}\n${TC}`,
+    dupClose:    () => `${T}\n${B}\n${TC}\n${TC}`,
+    typoOpen:    () => `<thinkng>\n${B}\n${TC}`,
+    typoClose:   () => `${T}\n${B}\n</thinkng>`,
+    typoBoth:    () => `<thinkng>\n${B}\n</thinkng>`,
+  };
+  const fences = {
+    none:          (s) => s,
+    openGlued:     (s) => '```' + s,
+    openOwn:       (s) => '```\n' + s,
+    closeGlued:    (s) => s + '```',
+    closeOwn:      (s) => s + '\n```',
+    bothGlued:     (s) => '```' + s + '```',
+    bothOwn:       (s) => '```\n' + s + '\n```',
+    openGlCloseOwn:(s) => '```' + s + '\n```',
+    openOwnCloseGl:(s) => '```\n' + s + '```',
+  };
+  const canonicalFence = new Set(['bothGlued', 'bothOwn', 'openGlCloseOwn', 'openOwnCloseGl']);
+  // With NO tags at all, only a complete fenced pair is recognizable as a
+  // thinking block (the tagless-fallback path). A lone fence with no partner
+  // gives no reliable delimiters → must be left alone (no guessing).
+  const recoverableNoBoth = new Set(['bothGlued', 'bothOwn', 'openGlCloseOwn', 'openOwnCloseGl']);
+  let catalog = 0, catalogFail = 0;
+
+  for (const [tagName, makeTag] of Object.entries(tagStates)) {
+    for (const [fenceName, apply] of Object.entries(fences)) {
+      catalog++;
+      const raw = apply(makeTag());
+      const expectLeave = tagName === 'both' && canonicalFence.has(fenceName) ||
+                          tagName === 'noBoth' && !recoverableNoBoth.has(fenceName);
+      const rebuilt = c.rebuildMessageText(raw);
+      const name = `26 ${tagName} × ${fenceName} → ${expectLeave ? 'leave' : 'rebuild'}`;
+
+      if (expectLeave) {
+        const ok = rebuilt === null;
+        if (!ok) { catalogFail++; console.log(`FAIL  ${name}\n       raw: ${JSON.stringify(raw).slice(0,120)}\n       out: ${JSON.stringify(rebuilt ? rebuilt.text : '(null)').slice(0,120)}`); }
+        else check(name, true, true);
+      } else {
+        // Rebuild must: exist, have exactly one open+close tag, body
+        // preserved, and end with </thinking> + a closing fence.
+        const ok = !!rebuilt &&
+          (rebuilt.text.match(/<thinking>/g) || []).length === 1 &&
+          (rebuilt.text.match(/<\/thinking>/g) || []).length === 1 &&
+          rebuilt.text.includes('1) plan') &&
+          /^```\s*\n?<thinking>/.test(rebuilt.text) &&
+          /<\/thinking>\s*\n?\s*```\s*$/.test(rebuilt.text.trim());
+        if (!ok) { catalogFail++; console.log(`FAIL ${name}\n       out: ${JSON.stringify(rebuilt ? rebuilt.text : '(null — not rebuilt)').slice(0,200)}`); }
+        else check(name, true, true);
+      }
+    }
+  }
+  check(`26 catalog matrix complete (${catalog} combos, ${catalogFail} failures)`, catalogFail === 0, true);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
