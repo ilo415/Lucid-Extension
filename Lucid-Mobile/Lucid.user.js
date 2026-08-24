@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lucid (Mobile)
 // @namespace    lucid-mobile
-// @version      1.5.0
+// @version      1.6.0
 // @description  Mends DreamJourney thinking blocks on phones: broken fences, missing/swapped/typo'd thinking tags, plus a per-message fix button and empty-send continue. Desktop-extension logic bundled as a user script.
 // @author       Nyveria
 // @match        https://dreamjourneyai.com/app/*
@@ -848,20 +848,22 @@
 
   const SAFETY_INTERVAL = 2500;
 
-  let stats = { fixed: 0, lastAt: null };
+    let stats = { fixed: 0, lastAt: null };
+    let autoRefresh = true;   // after clicking Stop, offer a 3s cancel-able reload
 
-  // ── Storage ──
-  function loadState(cb) {
-    chrome.storage.local.get(['djtfStats', 'djtfContinue'], (res) => {
-      continueEnabled = res.djtfContinue !== false;
-      if (res.djtfStats) stats = res.djtfStats;
-      if (cb) cb();
-    });
-  }
-
-  function saveState() {
-      chrome.storage.local.set({ djtfStats: stats, djtfContinue: continueEnabled });
+    // ── Storage ──
+    function loadState(cb) {
+      chrome.storage.local.get(['djtfStats', 'djtfContinue', 'djtfAutoRefresh'], (res) => {
+        continueEnabled = res.djtfContinue !== false;
+        autoRefresh = res.djtfAutoRefresh !== false;
+        if (res.djtfStats) stats = res.djtfStats;
+        if (cb) cb();
+      });
     }
+
+    function saveState() {
+        chrome.storage.local.set({ djtfStats: stats, djtfContinue: continueEnabled, djtfAutoRefresh: autoRefresh });
+      }
 
     // In-page toast (floats over the chat) for user-facing notices.
     let toastTimer = null;
@@ -1339,6 +1341,74 @@
     }
   }
 
+  // ── Auto-refresh on Stop (Aster port) ──────────────────────
+  // When the user clicks DJ's "Stop generating" button, offer a 3-second
+  // countdown toast with a Cancel button, then reload the page. A hard
+  // reload after stopping a generation reduces the chance of DJ's double
+  // or vanishing-message bug (Aster's proven behavior, faithful port).
+  // Only the exact stop button triggers it; nothing reloads unprompted.
+  let refreshToastActive = false;
+
+  function showRefreshToast() {
+    if (!autoRefresh || refreshToastActive) return;
+    refreshToastActive = true;
+    let left = 3;
+    let cancelled = false;
+    const t = document.createElement('div');
+    t.setAttribute('data-djtf-toast', 'refresh');
+    t.style.cssText = [
+      'position:fixed','bottom:90px','left:50%','transform:translateX(-50%)',
+      'z-index:99999','min-width:320px',
+      'background:rgba(19,19,34,.97)','border:1px solid rgba(139,92,246,.55)',
+      'color:#e2e8f0','border-radius:10px','padding:10px 14px',
+      'box-shadow:0 8px 30px rgba(0,0,0,.5)','font-family:inherit','font-size:13px',
+      'line-height:1.4','text-align:center'
+    ].join(';');
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:10px';
+    row.innerHTML = '<span>Refresh in</span><b class="djtf-refresh-count">3</b>';
+    const cancel = document.createElement('button');
+    cancel.textContent = 'Cancel';
+    cancel.style.cssText = [
+      'background:rgba(255,255,255,.08)','border:1px solid rgba(255,255,255,.2)',
+      'color:#e2e8f0','border-radius:6px','padding:2px 10px','font-size:12px',
+      'cursor:pointer','font-family:inherit'
+    ].join(';');
+    cancel.addEventListener('click', () => { cancelled = true; t.remove(); refreshToastActive = false; });
+    row.appendChild(cancel);
+    const note = document.createElement('div');
+    note.textContent = 'Refreshing after Stop reduces double / vanishing messages.';
+    note.style.cssText = 'font-size:11px;color:#94a3b8;margin-top:6px';
+    t.appendChild(row); t.appendChild(note);
+    document.body.appendChild(t);
+
+    const countEl = t.querySelector('.djtf-refresh-count');
+    const iv = setInterval(() => {
+      if (cancelled) { clearInterval(iv); return; }
+      left--;
+      if (countEl) countEl.textContent = String(left);
+      if (left <= 0) {
+        clearInterval(iv);
+        try { t.remove(); } catch (_) {}
+        refreshToastActive = false;
+        location.reload();
+      }
+    }, 1000);
+  }
+
+  // Delegated Stop-button listener (document level, matches Aster's method).
+  function hookStopButton() {
+    document.addEventListener('click', (e) => {
+      if (!autoRefresh || !e.target || !e.target.closest) return;
+      const stop = e.target.closest('[aria-label="Stop generating response"], [aria-label="Stop generating"], [title*="Stop generating" i]');
+      if (stop) {
+        e.preventDefault();
+        e.stopPropagation();
+        showRefreshToast();
+      }
+    }, true);
+  }
+
   // ── Observers ──
   const injectObs = new MutationObserver(() => {
     // Debounce injection so we don't fight React's own render bursts.
@@ -1348,12 +1418,13 @@
   let injectTimer = null;
 
   function start() {
-    injectObs.observe(document.body, { childList: true, subtree: true });
-    hookComposer();
-    setInterval(() => { injectFixButtons(); maybeEnableSend(); }, SAFETY_INTERVAL);
-    // Initial button pass after the app has had time to settle.
-    setTimeout(injectFixButtons, 4000);
-  }
+      injectObs.observe(document.body, { childList: true, subtree: true });
+      hookComposer();
+      hookStopButton();
+      setInterval(() => { injectFixButtons(); maybeEnableSend(); }, SAFETY_INTERVAL);
+      // Initial button pass after the app has had time to settle.
+      setTimeout(injectFixButtons, 4000);
+    }
 
   // ── Messaging (popup) ──
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -1373,8 +1444,13 @@
             });
             break;
           case 'getState':
-            sendResponse({ stats, cont: continueEnabled });
-            break;
+                    sendResponse({ stats, cont: continueEnabled, autoRefresh });
+                    break;
+                  case 'setAutoRefresh':
+                    autoRefresh = !!msg.value;
+                    saveState();
+                    sendResponse({ ok: true });
+                    break;
           case 'setContinue':
             continueEnabled = !!msg.value;
             saveState();
