@@ -337,12 +337,11 @@
   const ZWS = '\u200B';
   let continueEnabled = true;
   const cont = {
-    active: false,          // a ZWS send is in flight
-    zws: ZWS,
-    obs: null,              // bubble-finder MutationObserver
-    doneTimer: null,        // reply-completion poll
-    cleanupTimer: null,     // textarea restore
-  };
+      active: false,          // a ZWS send is in flight
+      zws: ZWS,
+      doneTimer: null,        // reply-completion poll
+      cleanupTimer: null,     // textarea restore
+    };
 
   // Composer controls with defensive fallbacks (the site has been known to
   // change class names; try the deprecated selectors first, then generic).
@@ -407,9 +406,8 @@
   // After the ZWS message appears, wait for the bot's reply to finish, then
   // click the message's own delete button (React-safe: DJ's control).
   function watchForZwsBubble() {
-    const root = document.querySelector('.scrollchatmessages') || document.body;
-    if (cont.obs) cont.obs.disconnect();
-    let found = null;
+      const root = document.querySelector('.scrollchatmessages') || document.body;
+      let found = null;
 
     const tryDelete = () => {
       // Only delete once the composer is idle again (reply finished) and the
@@ -434,10 +432,9 @@
     };
 
     const stopWatching = () => {
-      if (cont.doneTimer) { clearInterval(cont.doneTimer); cont.doneTimer = null; }
-      if (cont.obs) { cont.obs.disconnect(); cont.obs = null; }
-      found = null;
-    };
+          if (cont.doneTimer) { clearInterval(cont.doneTimer); cont.doneTimer = null; }
+          found = null;
+        };
 
     // Poll for completion: once the send control is enabled again AND the
     // bubble exists, attempt deletion every 800ms until it succeeds.

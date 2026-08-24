@@ -737,26 +737,25 @@
   }
 
   root.DJTFCore = {
-    levenshtein,
-    isThinkingTag,
-    findThinkingTags,
-    normalizeThinkingBlock,
-    esc,
-    inline,
-    renderMarkdownMin,
-    makeThinkingPre,
-    repairMessage,
-    sweepJunkMarkers,
-    hasSignature,
-    findCandidates,
-    rebuildMessageText,
-    hasNativeThinkingBox,
-    isHealthyThinkingText,
-    thinkingContentOf,
-    isThinkingTag,
-    hasCurlyQuotes,
-    normalizeQuotes,
-  };
+      levenshtein,
+      isThinkingTag,
+      findThinkingTags,
+      normalizeThinkingBlock,
+      esc,
+      inline,
+      renderMarkdownMin,
+      makeThinkingPre,
+      repairMessage,
+      sweepJunkMarkers,
+      hasSignature,
+      findCandidates,
+      rebuildMessageText,
+      hasNativeThinkingBox,
+      isHealthyThinkingText,
+      thinkingContentOf,
+      hasCurlyQuotes,
+      normalizeQuotes,
+    };
 
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = root.DJTFCore;
