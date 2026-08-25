@@ -559,18 +559,21 @@
     }, 1000);
   }
 
-  // Delegated Stop-button listener (document level, matches Aster's method).
-  function hookStopButton() {
-    document.addEventListener('click', (e) => {
-      if (!autoRefresh || !e.target || !e.target.closest) return;
-      const stop = e.target.closest('[aria-label="Stop generating response"], [aria-label="Stop generating"], [title*="Stop generating" i]');
-      if (stop) {
-        e.preventDefault();
-        e.stopPropagation();
-        showRefreshToast();
-      }
-    }, true);
-  }
+  // Delegated Stop-button listener (matches Aster's method, which lets the
+    // actual Stop action land on DJ first — NO preventDefault/stopPropagation
+    // here, so the generation genuinely stops — and only then offers the
+    // refresh, because the reset-state must reflect the stopped generation).
+    function hookStopButton() {
+      document.addEventListener('click', (e) => {
+        if (!autoRefresh || !e.target || !e.target.closest) return;
+        const stop = e.target.closest('[aria-label="Stop generating response"], [aria-label="Stop generating"], [title*="Stop generating" i]');
+        if (stop) {
+          // Do NOT preventDefault / stopPropagation — let DJ's own handler run
+          // so the generation actually stops. We only observe and offer refresh.
+          showRefreshToast();
+        }
+      }, true);
+    }
 
   // ── Observers ──
   const injectObs = new MutationObserver(() => {
