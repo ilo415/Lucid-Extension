@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lucid (Mobile)
 // @namespace    lucid-mobile
-// @version      1.6.1
+// @version      1.7.0
 // @description  Mends DreamJourney thinking blocks on phones: broken fences, missing/swapped/typo'd thinking tags, plus a per-message fix button and empty-send continue. Desktop-extension logic bundled as a user script.
 // @author       Nyveria
 // @match        https://dreamjourneyai.com/app/*
@@ -849,21 +849,23 @@
   const SAFETY_INTERVAL = 2500;
 
     let stats = { fixed: 0, lastAt: null };
-    let autoRefresh = true;   // after clicking Stop, offer a 3s cancel-able reload
+        let autoRefresh = true;   // after clicking Stop, offer a 3s cancel-able reload
+        let saveOnStop = true;    // on Stop, copy user msg + copy/delete bot partial
 
-    // ── Storage ──
-    function loadState(cb) {
-      chrome.storage.local.get(['djtfStats', 'djtfContinue', 'djtfAutoRefresh'], (res) => {
-        continueEnabled = res.djtfContinue !== false;
-        autoRefresh = res.djtfAutoRefresh !== false;
-        if (res.djtfStats) stats = res.djtfStats;
-        if (cb) cb();
-      });
-    }
+        // ── Storage ──
+        function loadState(cb) {
+          chrome.storage.local.get(['djtfStats', 'djtfContinue', 'djtfAutoRefresh', 'djtfSaveOnStop'], (res) => {
+            continueEnabled = res.djtfContinue !== false;
+            autoRefresh = res.djtfAutoRefresh !== false;
+            saveOnStop = res.djtfSaveOnStop !== false;
+            if (res.djtfStats) stats = res.djtfStats;
+            if (cb) cb();
+          });
+        }
 
-    function saveState() {
-        chrome.storage.local.set({ djtfStats: stats, djtfContinue: continueEnabled, djtfAutoRefresh: autoRefresh });
-      }
+        function saveState() {
+            chrome.storage.local.set({ djtfStats: stats, djtfContinue: continueEnabled, djtfAutoRefresh: autoRefresh, djtfSaveOnStop: saveOnStop });
+          }
 
     // In-page toast (floats over the chat) for user-facing notices.
     let toastTimer = null;
@@ -1397,20 +1399,97 @@
   }
 
   // Delegated Stop-button listener (matches Aster's method, which lets the
-    // actual Stop action land on DJ first — NO preventDefault/stopPropagation
-    // here, so the generation genuinely stops — and only then offers the
-    // refresh, because the reset-state must reflect the stopped generation).
-    function hookStopButton() {
-      document.addEventListener('click', (e) => {
-        if (!autoRefresh || !e.target || !e.target.closest) return;
-        const stop = e.target.closest('[aria-label="Stop generating response"], [aria-label="Stop generating"], [title*="Stop generating" i]');
-        if (stop) {
-          // Do NOT preventDefault / stopPropagation — let DJ's own handler run
-          // so the generation actually stops. We only observe and offer refresh.
-          showRefreshToast();
+      // actual Stop action land on DJ first — NO preventDefault/stopPropagation
+      // here, so the generation genuinely stops — and only then offers the
+      // refresh, because the reset-state must reflect the stopped generation).
+      function hookStopButton() {
+        document.addEventListener('click', (e) => {
+          if (!autoRefresh || !e.target || !e.target.closest) return;
+          const stop = e.target.closest('[aria-label="Stop generating response"], [aria-label="Stop generating"], [title*="Stop generating" i]');
+          if (stop) {
+            // Do NOT preventDefault / stopPropagation — let DJ's own handler run
+            // so the generation actually stops. We only observe and offer refresh.
+            if (settings.saveOnStop) copyDeleteOnStop();
+            showRefreshToast();
+          }
+        }, true);
+      }
+
+      // ── Copy + delete on Stop (novel addition) ─────────────────
+      // When Stop is clicked, before the refresh: copy the last USER message
+      // (your prompt survives the reload) and copy + delete the last BOT
+      // message (the cut-off partial reply doesn't persist as a broken half).
+      // All React-safe: deletes via DJ's own message delete button, copies
+      // via the clipboard API. Runs immediately — Cancel on the refresh does
+      // NOT undo this (text is safe in your clipboard).
+      let stopCopyDeleteDone = false;
+
+      function lastMessageTexts() {
+        const root = document.querySelector('.scrollchatmessages') || document.body;
+        const groups = Array.from(root.querySelectorAll('div.group[data-sentry-component="ChatMessage"]'));
+        let lastUser = '', lastBot = null; // {el, text}
+        for (const g of groups) {
+          const md = g.querySelector('div.markdown');
+          if (!md || !md.textContent || md.textContent.trim() === '\u200B') continue;
+          const isBot = !!g.querySelector('button[aria-label="Edit assistant message"]');
+          const txt = md.textContent.trim();
+          if (isBot) { lastBot = { el: g, text: txt }; }
+          else { lastUser = txt; }
         }
-      }, true);
-    }
+        return { lastUser, lastBot };
+      }
+
+      function copyText(text) {
+        if (!text) return Promise.resolve(false);
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            return navigator.clipboard.writeText(text).then(() => true, () => false);
+          }
+          // Fallback: legacy execCommand path.
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+          document.body.appendChild(ta);
+          ta.select();
+          let ok = false;
+          try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+          ta.remove();
+          return Promise.resolve(ok);
+        } catch (_) { return Promise.resolve(false); }
+      }
+
+      function deleteBotMessage(el) {
+        return new Promise((resolve) => {
+          if (!el) { resolve(false); return; }
+          try {
+            el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
+            setTimeout(() => {
+              const trash = el.querySelector('svg.lucide.lucide-trash2, svg.lucide-trash-2');
+              const delBtn = trash ? trash.closest('button') : null;
+              if (delBtn) {
+                delBtn.click();
+                resolve(true);
+              } else {
+                resolve(false); // no delete button found — give up quietly
+              }
+            }, 150);
+          } catch (_) { resolve(false); }
+        });
+      }
+
+      function copyDeleteOnStop() {
+        if (stopCopyDeleteDone) return;         // once per page load
+        stopCopyDeleteDone = true;
+        const { lastUser, lastBot } = lastMessageTexts();
+        // Copy the user's last message + the bot's partial (if any) to the
+        // clipboard as a combined snippet: user prompt then bot partial.
+        const parts = [];
+        if (lastUser) parts.push('— my message —\n' + lastUser);
+        if (lastBot && lastBot.text) parts.push('— bot partial —\n' + lastBot.text);
+        if (parts.length) copyText(parts.join('\n\n'));
+        // Delete the bot's cut-off partial from the chat (fire-and-forget).
+        if (lastBot) deleteBotMessage(lastBot.el);
+      }
 
   // ── Observers ──
   const injectObs = new MutationObserver(() => {
@@ -1447,13 +1526,18 @@
             });
             break;
           case 'getState':
-                    sendResponse({ stats, cont: continueEnabled, autoRefresh });
-                    break;
-                  case 'setAutoRefresh':
-                    autoRefresh = !!msg.value;
-                    saveState();
-                    sendResponse({ ok: true });
-                    break;
+                      sendResponse({ stats, cont: continueEnabled, autoRefresh, saveOnStop });
+                      break;
+                    case 'setAutoRefresh':
+                      autoRefresh = !!msg.value;
+                      saveState();
+                      sendResponse({ ok: true });
+                      break;
+                    case 'setSaveOnStop':
+                      saveOnStop = !!msg.value;
+                      saveState();
+                      sendResponse({ ok: true });
+                      break;
           case 'setContinue':
             continueEnabled = !!msg.value;
             saveState();

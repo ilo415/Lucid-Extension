@@ -33,6 +33,7 @@ async function refresh() {
   }
   document.getElementById('toggle-continue').checked = state.cont !== false;
   document.getElementById('toggle-refresh').checked = state.autoRefresh !== false;
+  document.getElementById('toggle-saveonstop').checked = state.saveOnStop !== false;
   document.getElementById('stat-fixed').textContent = state.stats?.fixed ?? 0;
   document.getElementById('stat-last').textContent = fmtTime(state.stats?.lastAt);
 }
@@ -48,6 +49,11 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('toggle-refresh').addEventListener('change', (e) => {
     send('setAutoRefresh', e.target.checked);
     flash(e.target.checked ? 'Auto-refresh on Stop enabled' : 'Auto-refresh on Stop disabled');
+  });
+
+  document.getElementById('toggle-saveonstop').addEventListener('change', (e) => {
+    send('setSaveOnStop', e.target.checked);
+    flash(e.target.checked ? 'Copy + delete on Stop enabled' : 'Copy + delete on Stop disabled');
   });
 
   document.getElementById('btn-scan').addEventListener('click', async () => {
