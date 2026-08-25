@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lucid (Mobile)
 // @namespace    lucid-mobile
-// @version      1.7.1
+// @version      1.8.0
 // @description  Mends DreamJourney thinking blocks on phones: broken fences, missing/swapped/typo'd thinking tags, plus a per-message fix button and empty-send continue. Desktop-extension logic bundled as a user script.
 // @author       Nyveria
 // @match        https://dreamjourneyai.com/app/*
@@ -1458,7 +1458,69 @@
                           if (stopCopyDone) return;         // once per page load
                           stopCopyDone = true;
                           const lastUser = lastUserMessageText();
-                          if (lastUser) copyText(lastUser);
+                          if (lastUser) {
+                            copyText(lastUser);
+                            // Persist the delete intent across the page reload: after the
+                            // refresh, the fresh content script deletes the message whose
+                            // text matches this (it should be gone from the live chat but
+                            // may survive as a stale copy in the reloaded page).
+                            try {
+                              chrome.storage.local.set({ djtfDeletePending: lastUser.slice(0, 4000) });
+                            } catch (_) {}
+                          }
+                        }
+
+                        // ── Post-refresh auto-delete of the copied message ──
+                        // After a reload, if a delete-pending text was saved, find the
+                        // matching USER message in the chat and click its own delete
+                        // button (React-safe). Retry a few times in case the chat loads
+                        // lazily; clear the flag once found+deleted, or after giving up.
+                        let deletePendingAttempts = 0;
+                        const DELETE_PENDING_MAX_ATTEMPTS = 10;
+
+                        function findPendingUserMessage(text) {
+                          const root = document.querySelector('.scrollchatmessages') || document.body;
+                          const groups = Array.from(root.querySelectorAll('div.group[data-sentry-component="ChatMessage"]'));
+                          const target = String(text || '').trim();
+                          if (!target) return null;
+                          for (const g of groups) {
+                            const md = g.querySelector('div.markdown');
+                            if (!md || !md.textContent) continue;
+                            const isBot = !!g.querySelector('button[aria-label="Edit assistant message"]');
+                            if (isBot) continue;
+                            if (md.textContent.trim() === target) return g;
+                          }
+                          return null;
+                        }
+
+                        function maybeDeletePendingMessage() {
+                                                  chrome.storage.local.get(['djtfDeletePending'], (res) => {
+                                                    const pending = res && res.djtfDeletePending;
+                                                    if (!pending) return;
+                                                    const g = findPendingUserMessage(pending);
+                                                    if (!g) {
+                                                      // Not rendered yet or already gone. Retry a bounded number of
+                                                      // times across the safety interval, then give up + clear.
+                                                      deletePendingAttempts++;
+                                                      if (deletePendingAttempts > DELETE_PENDING_MAX_ATTEMPTS) {
+                                                        chrome.storage.local.remove(['djtfDeletePending']);
+                                                        deletePendingAttempts = 0;
+                                                      }
+                                                      return;
+                                                    }
+                            // Found it — click its own delete control (React-safe).
+                            g.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
+                            setTimeout(() => {
+                              const trash = g.querySelector('svg.lucide.lucide-trash2, svg.lucide-trash-2');
+                              const delBtn = trash ? trash.closest('button') : null;
+                              if (delBtn) {
+                                delBtn.click();
+                                chrome.storage.local.remove(['djtfDeletePending']);
+                              } else {
+                                chrome.storage.local.remove(['djtfDeletePending']); // can't find the control — stop trying
+                              }
+                            }, 150);
+                          });
                         }
 
   // ── Observers ──
@@ -1470,13 +1532,16 @@
   let injectTimer = null;
 
   function start() {
-      injectObs.observe(document.body, { childList: true, subtree: true });
-      hookComposer();
-      hookStopButton();
-      setInterval(() => { injectFixButtons(); maybeEnableSend(); }, SAFETY_INTERVAL);
-      // Initial button pass after the app has had time to settle.
-      setTimeout(injectFixButtons, 4000);
-    }
+        injectObs.observe(document.body, { childList: true, subtree: true });
+        hookComposer();
+        hookStopButton();
+        setInterval(() => { injectFixButtons(); maybeEnableSend(); maybeDeletePendingMessage(); }, SAFETY_INTERVAL);
+        // Initial button pass after the app has had time to settle.
+        setTimeout(injectFixButtons, 4000);
+        // If a delete-pending flag survived the reload, start looking for the
+        // matching message (chat may load lazily).
+        setTimeout(maybeDeletePendingMessage, 3000);
+      }
 
   // ── Messaging (popup) ──
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
