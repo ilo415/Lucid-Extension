@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lucid (Mobile)
 // @namespace    lucid-mobile
-// @version      1.9.2
+// @version      1.10.0
 // @description  Mends DreamJourney thinking blocks on phones: broken fences, missing/swapped/typo'd thinking tags, plus a per-message fix button and empty-send continue. Desktop-extension logic bundled as a user script.
 // @author       Nyveria
 // @match        https://dreamjourneyai.com/app/*
@@ -1609,21 +1609,74 @@
                                                           }
                                                           return;
                                                         }
-                                                        g.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
-                                                                                                                setTimeout(() => {
-                                                                                                                  try {
-                                                                                                                    // Click DJ's own "Delete user message" button by aria-label —
-                                                                                                                    // far more reliable than hunting the trash icon (the button
-                                                                                                                    // exists even while invisible until hover).
-                                                                                                                    const delBtn = g.querySelector('button[aria-label="Delete user message"]');
-                                                                                                                    if (delBtn) delBtn.click();
-                                                                                                                  } catch (_) {}
-                                                                                                                  try { chrome.storage.local.remove(['djtfDeletePending']); } catch (_) {}
-                                                                                                                }, 150);
-                                                      } catch (_) {}
+                                                        // Click DJ's own "Delete user message" button by aria-label —
+                                                        // far more reliable than hunting the trash icon (the button
+                                                        // exists even while invisible until hover).
+                                                        const delBtn = g.querySelector('button[aria-label="Delete user message"]');
+                                                        if (!delBtn) {
+                                                          // Can't find the delete control — stop trying.
+                                                          try { chrome.storage.local.remove(['djtfDeletePending']); } catch (_) {}
+                                                          return;
+                                                        }
+                                                        delBtn.click();
+                                                        // DJ then shows a confirmation modal ("Delete Message?")
+                                                        // with a Cancel / red Delete button. Click the Delete
+                                                        // confirm. The modal renders async, so poll briefly.
+                                                        confirmDeleteDialog();
+                                                      } catch (_) { try { chrome.storage.local.remove(['djtfDeletePending']); } catch (_) {} }
                                                     });
                                                   } catch (_) {}
                                                 }
+
+                        // Click the red "Delete" confirm in DJ's "Delete Message?"
+                        // confirmation modal. The modal is a floating dialog
+                        // (Radix portal) with the heading, so locate it by that
+                        // heading, then click its Delete button. Poll a few times
+                        // because the dialog animates in.
+                        function confirmDeleteDialog() {
+                          let tries = 0;
+                          const MAX = 12;
+                          const attempt = () => {
+                            tries++;
+                            try {
+                              // Find the heading element exactly matching the modal title.
+                              let heading = null;
+                              document.querySelectorAll('h2').forEach((h) => {
+                                if (heading) return;
+                                const tx = (h.textContent || '').trim();
+                                if (tx === 'Delete Message?') heading = h;
+                              });
+                              if (!heading) { headlessRetry(); return; }
+                              // The modal container wraps the heading + buttons.
+                              const modal = heading.closest('[role="dialog"]') ||
+                                            heading.closest('div[class*="bg-black/90"]') ||
+                                            heading.parentElement;
+                              if (!modal) { headlessRetry(); return; }
+                              // Click the confirm button: red "Delete" (never "Cancel").
+                              const btns = Array.from(modal.querySelectorAll('button'));
+                              for (const b of btns) {
+                                const bt = (b.textContent || '').trim();
+                                if (bt === 'Delete') {
+                                  b.click();
+                                  // Done — clear the pending flag so we don't redo it.
+                                  try { chrome.storage.local.remove(['djtfDeletePending']); } catch (_) {}
+                                  return;
+                                }
+                              }
+                              headlessRetry();
+                            } catch (_) { headlessRetry(); }
+                          };
+                          const headlessRetry = () => {
+                            if (tries >= MAX) {
+                              // Give up on the confirm; drop the flag so we don't
+                              // keep retrying forever.
+                              try { chrome.storage.local.remove(['djtfDeletePending']); } catch (_) {}
+                              return;
+                            }
+                            setTimeout(attempt, 250);
+                          };
+                          attempt();
+                        }
 
   // ── Observers ──
   const injectObs = new MutationObserver(() => {
