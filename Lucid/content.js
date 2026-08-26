@@ -43,7 +43,7 @@
               el = document.createElement('div');
               el.setAttribute('data-djtf-toast', 'notice');
           el.style.cssText = [
-            'position:fixed','bottom:90px','left:50%','transform:translateX(-50%)',
+            'position:fixed','bottom:150px','left:50%','transform:translateX(-50%)',
             'z-index:99999','max-width:480px',
             'background:rgba(19,19,34,.97)','border:1px solid rgba(245,158,11,.55)',
             'color:#fbbf24','border-radius:10px','padding:10px 14px',
