@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lucid (Mobile)
 // @namespace    lucid-mobile
-// @version      1.10.2
+// @version      1.10.3
 // @description  Mends DreamJourney thinking blocks on phones: broken fences, missing/swapped/typo'd thinking tags, plus a per-message fix button and empty-send continue. Desktop-extension logic bundled as a user script.
 // @author       Nyveria
 // @match        https://dreamjourneyai.com/app/*
@@ -1600,9 +1600,21 @@
                                                       try {
                                                         const pending = res && res.djtfDeletePending;
                                                         if (!pending) return;
-                                                        const g = findPendingUserMessage(pending);
+                                                        let g = findPendingUserMessage(pending);
+                                                        // If exact text matching keeps failing (the copied text can
+                                                        // differ from the post-refresh DOM — e.g. a thinking block
+                                                        // inside the user message, or markdown whitespace drift),
+                                                        // fall back to the LAST user message: the flag was armed for
+                                                        // "the user's last message at Stop time", so once the pending
+                                                        // flag has survived a few attempts it's the right target.
                                                         if (!g) {
                                                           deletePendingAttempts++;
+                                                          if (deletePendingAttempts >= 3) {
+                                                            const userGroups = userMessageGroups();
+                                                            if (userGroups.length) g = userGroups[userGroups.length - 1];
+                                                          }
+                                                        }
+                                                        if (!g) {
                                                           if (deletePendingAttempts > DELETE_PENDING_MAX_ATTEMPTS) {
                                                             try { chrome.storage.local.remove(['djtfDeletePending']); } catch (_) {}
                                                             deletePendingAttempts = 0;
