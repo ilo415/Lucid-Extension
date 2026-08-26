@@ -56,10 +56,10 @@
     }
 
   function bumpStats(n) {
-    stats.fixed += n;
-    stats.lastAt = Date.now();
-    chrome.storage.local.set({ djtfStats: stats });
-  }
+      stats.fixed += n;
+      stats.lastAt = Date.now();
+      try { chrome.storage.local.set({ djtfStats: stats }); } catch (_) {}
+    }
 
   // ── "Still generating?" fast-path via the composer ──
   // Generation = the composer send control is disabled. Scope detection is

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lucid (Mobile)
 // @namespace    lucid-mobile
-// @version      1.8.2
+// @version      1.8.3
 // @description  Mends DreamJourney thinking blocks on phones: broken fences, missing/swapped/typo'd thinking tags, plus a per-message fix button and empty-send continue. Desktop-extension logic bundled as a user script.
 // @author       Nyveria
 // @match        https://dreamjourneyai.com/app/*
@@ -893,10 +893,10 @@
     }
 
   function bumpStats(n) {
-    stats.fixed += n;
-    stats.lastAt = Date.now();
-    chrome.storage.local.set({ djtfStats: stats });
-  }
+      stats.fixed += n;
+      stats.lastAt = Date.now();
+      try { chrome.storage.local.set({ djtfStats: stats }); } catch (_) {}
+    }
 
   // ── "Still generating?" fast-path via the composer ──
   // Generation = the composer send control is disabled. Scope detection is
