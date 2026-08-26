@@ -582,31 +582,39 @@
       }
 
       // ── Copy on Stop ────────────────────────────────────────────
-            // When Stop is clicked, copy the user's last message to the clipboard
-            // so their prompt survives the page reload (DJ stops the bot's reply
-            // itself — we only preserve the user's own words). Runs immediately;
-            // Cancel on the refresh toast does NOT undo it (text is in clipboard).
-            let stopCopyDone = false;
+                              // When Stop is clicked, copy the user's last message to the clipboard
+                              // so their prompt survives the page reload (DJ stops the bot's reply
+                              // itself — we only preserve the user's own words). Runs immediately;
+                              // Cancel on the refresh toast does NOT undo it (text is in clipboard).
+                              let stopCopyDone = false;
 
-            function lastUserMessageText() {
+                        // A "user" message group is identified by DJ's own button labels
+                        // ("Edit user message", "Delete user message", "Copy user message").
+                        // Bot messages carry the "assistant" variants instead. This is the
+                        // ground-truth check — no guessing by position or generation state.
+                        function isUserGroup(g) {
+                          return !!g.querySelector(
+                            'button[aria-label="Edit user message"], button[aria-label="Delete user message"], button[aria-label="Copy user message"]'
+                          );
+                        }
+                        function isBotGroup(g) {
+                          return !!g.querySelector(
+                            'button[aria-label="Edit assistant message"], button[aria-label="Delete assistant message"], button[aria-label="Copy assistant message"]'
+                          );
+                        }
+
+                        function lastUserMessageText() {
                           const root = document.querySelector('.scrollchatmessages') || document.body;
                           const groups = Array.from(root.querySelectorAll('div.group[data-sentry-component="ChatMessage"]'));
-                          // While a generation is streaming, the LAST group is the bot's
-                          // partial (it has no "Edit assistant message" button yet, so the
-                          // isBot check would mislabel it). Skip the final group while
-                          // generating, then take the last remaining USER message.
-                          const generating = isGenerating();
+                          // Walk backwards; the LAST user-marked group is our message.
                           for (let i = groups.length - 1; i >= 0; i--) {
-                            if (generating && i === groups.length - 1) continue;
+                            if (isBotGroup(groups[i])) continue;
+                            if (!isUserGroup(groups[i])) continue;
                             const md = groups[i].querySelector('div.markdown');
                             if (!md || !md.textContent || md.textContent.trim() === '\u200B') continue;
-                            const isBot = !!groups[i].querySelector('button[aria-label="Edit assistant message"]');
-                            if (!isBot) return md.textContent.trim();
+                            return md.textContent.trim();
                           }
-                          // Fallback: no non-bot found (or not generating) — last group.
-                          const last = groups[groups.length - 1];
-                          const md = last && last.querySelector('div.markdown');
-                          return (md && md.textContent && md.textContent.trim() !== '\u200B') ? md.textContent.trim() : '';
+                          return '';
                         }
 
             function copyText(text) {
@@ -639,21 +647,24 @@
                         }
 
             function copyUserOnStop() {
-                          if (stopCopyDone) return;         // once per page load
-                          stopCopyDone = true;
-                          const lastUser = lastUserMessageText();
-                          if (lastUser) {
-                            // Copy FIRST, persist the delete intent only if the copy
-                            // succeeded — and delay any reload long enough for the write.
-                            copyText(lastUser).then((ok) => {
-                              if (ok) {
-                                try {
-                                  chrome.storage.local.set({ djtfDeletePending: lastUser.slice(0, 4000) });
-                                } catch (_) {}
-                              }
-                            });
-                          }
-                        }
+                                      if (stopCopyDone) return;         // once per page load
+                                      stopCopyDone = true;
+                                      const lastUser = lastUserMessageText();
+                                      if (lastUser) {
+                                        // Set the delete-pending flag FIRST (regardless of
+                                        // copy success — the delete should still happen if the
+                                        // message is present after refresh; the copy is a bonus).
+                                        try {
+                                          chrome.storage.local.set({ djtfDeletePending: lastUser.slice(0, 4000) });
+                                        } catch (_) {}
+                                        // Copy to clipboard.
+                                        copyText(lastUser).then((ok) => {
+                                          try {
+                                            showToast(ok ? '✓ Message copied — will auto-delete after refresh' : 'Message NOT copied (clipboard blocked), but auto-delete armed');
+                                          } catch (_) {}
+                                        });
+                                      }
+                                    }
 
                         // Normalize for tolerant message matching (DJ re-renders can change
                         // whitespace/smart quotes between the captured text and the reloaded
@@ -678,8 +689,8 @@
                                                   for (const g of groups) {
                                                     const md = g.querySelector('div.markdown');
                                                     if (!md || !md.textContent) continue;
-                                                    const isBot = !!g.querySelector('button[aria-label="Edit assistant message"]');
-                                                    if (isBot) continue;
+                                                    if (isBotGroup(g)) continue;
+                                                    if (!isUserGroup(g)) continue;
                                                     if (normForMatch(md.textContent) === target) return g;
                                                   }
                                                   return null;
@@ -707,14 +718,16 @@
                                                           return;
                                                         }
                                                         g.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
-                                                        setTimeout(() => {
-                                                          try {
-                                                            const trash = g.querySelector('svg.lucide.lucide-trash2, svg.lucide-trash-2');
-                                                            const delBtn = trash ? trash.closest('button') : null;
-                                                            if (delBtn) delBtn.click();
-                                                          } catch (_) {}
-                                                          try { chrome.storage.local.remove(['djtfDeletePending']); } catch (_) {}
-                                                        }, 150);
+                                                                                                                setTimeout(() => {
+                                                                                                                  try {
+                                                                                                                    // Click DJ's own "Delete user message" button by aria-label —
+                                                                                                                    // far more reliable than hunting the trash icon (the button
+                                                                                                                    // exists even while invisible until hover).
+                                                                                                                    const delBtn = g.querySelector('button[aria-label="Delete user message"]');
+                                                                                                                    if (delBtn) delBtn.click();
+                                                                                                                  } catch (_) {}
+                                                                                                                  try { chrome.storage.local.remove(['djtfDeletePending']); } catch (_) {}
+                                                                                                                }, 150);
                                                       } catch (_) {}
                                                     });
                                                   } catch (_) {}
