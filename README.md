@@ -6,6 +6,8 @@ Mends the malformed "thinking blocks" that reasoning models emit before their re
 
 Fixes go through DreamJourney's **own edit dialog** (click Edit → rewrite raw source → Save), never raw DOM surgery, so DreamJourney/React never breaks.
 
+📋 **[View the changelog](CHANGELOG.md)** for version history.
+
 ---
 
 ## 📥 Download

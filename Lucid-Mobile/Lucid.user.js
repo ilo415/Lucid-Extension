@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lucid (Mobile)
 // @namespace    lucid-mobile
-// @version      1.10.4
+// @version      1.10.5
 // @description  Mends DreamJourney thinking blocks on phones: broken fences, missing/swapped/typo'd thinking tags, plus a per-message fix button and empty-send continue. Desktop-extension logic bundled as a user script.
 // @author       Nyveria
 // @match        https://dreamjourneyai.com/app/*
@@ -1301,7 +1301,7 @@
 
   function findZwsBubble() {
     const root = document.querySelector('.scrollchatmessages') || document.body;
-    const groups = root.querySelectorAll('div.group[data-sentry-component="ChatMessage"]');
+    const groups = root.querySelectorAll('div.group');
     for (const g of groups) {
       const md = g.querySelector('div.markdown');
       if (md && md.textContent === cont.zws) return g;
@@ -1446,16 +1446,6 @@
         if (!el) return null;
         return el.closest('.group') || el.parentElement;
       }
-      function isUserGroup(g) {
-        return !!g && !!g.querySelector(
-          'button[aria-label="Edit user message"], button[aria-label="Delete user message"], button[aria-label="Copy user message"]'
-        );
-      }
-      function isBotGroup(g) {
-        return !!g && !!g.querySelector(
-          'button[aria-label="Edit assistant message"], button[aria-label="Delete assistant message"], button[aria-label="Copy assistant message"]'
-        );
-      }
       function groupText(g) {
         if (!g) return '';
         const md = g.querySelector('div.markdown');
@@ -1595,7 +1585,7 @@
                                                                                                                           }
                                                                                                                           // Pass 2: any non-bot .group with matching text.
                                                                                                                           const bots = botGroupSet();
-                                                                                                                          for (const g of Array.from(root.querySelectorAll('.group, [data-sentry-component="ChatMessage"]'))) {
+                                                                                                                          for (const g of Array.from(root.querySelectorAll('.group'))) {
                                                                                                                             if (bots.has(g)) continue;
                                                                                                                             if (normForMatch(groupText(g)) === target) return g;
                                                                                                                           }
