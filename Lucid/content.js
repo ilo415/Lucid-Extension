@@ -604,18 +604,46 @@
                         }
 
                         function lastUserMessageText() {
-                          const root = document.querySelector('.scrollchatmessages') || document.body;
-                          const groups = Array.from(root.querySelectorAll('div.group[data-sentry-component="ChatMessage"]'));
-                          // Walk backwards; the LAST user-marked group is our message.
-                          for (let i = groups.length - 1; i >= 0; i--) {
-                            if (isBotGroup(groups[i])) continue;
-                            if (!isUserGroup(groups[i])) continue;
-                            const md = groups[i].querySelector('div.markdown');
-                            if (!md || !md.textContent || md.textContent.trim() === '\u200B') continue;
-                            return md.textContent.trim();
-                          }
-                          return '';
-                        }
+                                                                          const root = document.querySelector('.scrollchatmessages') || document.body;
+                                                                          const groups = Array.from(root.querySelectorAll('div.group[data-sentry-component="ChatMessage"]'));
+                                                                          const text = (g) => {
+                                                                            const md = g && g.querySelector('div.markdown');
+                                                                            if (!md || !md.textContent) return '';
+                                                                            const t = md.textContent.trim();
+                                                                            return (t === '\u200B') ? '' : t;
+                                                                          };
+                                                                          if (!groups.length) return '';
+
+                                                                          // Pass 1: explicit user-labeled groups (normal state).
+                                                                          for (let i = groups.length - 1; i >= 0; i--) {
+                                                                            if (isBotGroup(groups[i])) continue;
+                                                                            if (!isUserGroup(groups[i])) continue;
+                                                                            const t = text(groups[i]);
+                                                                            if (t) return t;
+                                                                          }
+
+                                                                          // Pass 2: walk backwards, skip assistant-labeled groups;
+                                                                                                                                                                                                                              // take the last non-bot group's text. Handles streaming
+                                                                                                                                                                                                                              // (partial has no labels yet) AND label-less users.
+                                                                                                                                                                                                                              // Robust streaming detection: if the LAST group has content
+                                                                                                                                                                                                                              // but NEITHER user NOR assistant action buttons, it's almost
+                                                                                                                                                                                                                              // certainly the in-flight bot partial — skip it. This works
+                                                                                                                                                                                                                              // even if isGenerating() races ahead of the click.
+                                                                                                                                                                                                                              const hasUserLabels = (g) => isUserGroup(g);
+                                                                                                                                                                                                                              const lastGroup = groups[groups.length - 1];
+                                                                                                                                                                                                                              const lastUnlabeled =
+                                                                                                                                                                                                                                lastGroup && !isBotGroup(lastGroup) && !hasUserLabels(lastGroup) &&
+                                                                                                                                                                                                                                text(lastGroup) !== '';
+                                                                                                                                                                                                                              const generating = isGenerating() || lastUnlabeled;
+                                                                                                                                                                                                                              const lastIdx = groups.length - 1;
+                                                                                                                                                                                                                              for (let i = lastIdx; i >= 0; i--) {
+                                                                                                                                                                                                                                if (generating && i === lastIdx) continue;
+                                                                                                                                                                                                                                if (isBotGroup(groups[i])) continue;
+                                                                                                                                                                                                                                const t = text(groups[i]);
+                                                                                                                                                                                                                                if (t) return t;
+                                                                                                                                                                                                                              }
+                                                                                                                                                                                                                              return '';
+                                                                        }
 
             function copyText(text) {
                           if (!text) return Promise.resolve(false);
@@ -647,26 +675,28 @@
                         }
 
             function copyUserOnStop() {
-                                      if (stopCopyDone) return;         // once per page load
-                                      stopCopyDone = true;
-                                      const lastUser = lastUserMessageText();
-                                      if (lastUser) {
-                                        // Set the delete-pending flag FIRST (regardless of
-                                        // copy success — the delete should still happen if the
-                                        // message is present after refresh; the copy is a bonus).
-                                        try {
-                                          chrome.storage.local.set({ djtfDeletePending: lastUser.slice(0, 4000) });
-                                        } catch (_) {}
-                                        // Copy to clipboard.
-                                        copyText(lastUser).then((ok) => {
-                                          try {
-                                            showToast(ok ? '✓ Message copied — will auto-delete after refresh' : 'Message NOT copied (clipboard blocked), but auto-delete armed');
-                                          } catch (_) {}
-                                        });
-                                      }
-                                    }
+                                                  if (stopCopyDone) return;         // once per page load
+                                                  stopCopyDone = true;
+                                                  const lastUser = lastUserMessageText();
+                                                  if (!lastUser) {
+                                                    try { showToast('⚠️ Couldn\u2019t find your last message to copy'); } catch (_) {}
+                                                    return;
+                                                  }
+                                                  // Set the delete-pending flag FIRST (regardless of
+                                                  // copy success — the delete should still happen if the
+                                                  // message is present after refresh; the copy is a bonus).
+                                                  try {
+                                                    chrome.storage.local.set({ djtfDeletePending: lastUser.slice(0, 4000) });
+                                                  } catch (_) {}
+                                                  // Copy to clipboard.
+                                                  copyText(lastUser).then((ok) => {
+                                                                                                      try {
+                                                                                                        showToast(ok ? '✓ Message copied — will auto-delete after refresh' : 'Message NOT copied (clipboard blocked), but auto-delete armed');
+                                                                                                      } catch (_) {}
+                                                                                                    });
+                                                                                      }
 
-                        // Normalize for tolerant message matching (DJ re-renders can change
+                                                                          // Normalize for tolerant message matching (DJ re-renders can change
                         // whitespace/smart quotes between the captured text and the reloaded
                         // DOM — exact === fails. Compare on whitespace-collapsed lowercase.)
                         function normForMatch(s) {
@@ -682,19 +712,28 @@
                         const DELETE_PENDING_MAX_ATTEMPTS = 10;
 
                         function findPendingUserMessage(text) {
-                                                  const root = document.querySelector('.scrollchatmessages') || document.body;
-                                                  const groups = Array.from(root.querySelectorAll('div.group[data-sentry-component="ChatMessage"]'));
-                                                  const target = normForMatch(text);
-                                                  if (!target) return null;
-                                                  for (const g of groups) {
-                                                    const md = g.querySelector('div.markdown');
-                                                    if (!md || !md.textContent) continue;
-                                                    if (isBotGroup(g)) continue;
-                                                    if (!isUserGroup(g)) continue;
-                                                    if (normForMatch(md.textContent) === target) return g;
-                                                  }
-                                                  return null;
-                                                }
+                                                                          const root = document.querySelector('.scrollchatmessages') || document.body;
+                                                                          const groups = Array.from(root.querySelectorAll('div.group[data-sentry-component="ChatMessage"]'));
+                                                                          const target = normForMatch(text);
+                                                                          if (!target) return null;
+                                                                          // Pass 1: user-labeled + text match.
+                                                                          for (const g of groups) {
+                                                                            const md = g.querySelector('div.markdown');
+                                                                            if (!md || !md.textContent) continue;
+                                                                            if (isBotGroup(g)) continue;
+                                                                            if (!isUserGroup(g)) continue;
+                                                                            if (normForMatch(md.textContent) === target) return g;
+                                                                          }
+                                                                          // Pass 2 (fallback): first non-bot group whose text matches
+                                                                          // (works when labels aren't rendered).
+                                                                          for (const g of groups) {
+                                                                            const md = g.querySelector('div.markdown');
+                                                                            if (!md || !md.textContent) continue;
+                                                                            if (isBotGroup(g)) continue;
+                                                                            if (normForMatch(md.textContent) === target) return g;
+                                                                          }
+                                                                          return null;
+                                                                        }
 
                         function maybeDeletePendingMessage() {
                                                   // If the extension context was invalidated (reload/
