@@ -586,51 +586,77 @@
             let stopCopyDone = false;
 
             function lastUserMessageText() {
-              const root = document.querySelector('.scrollchatmessages') || document.body;
-              const groups = Array.from(root.querySelectorAll('div.group[data-sentry-component="ChatMessage"]'));
-              let lastUser = '';
-              for (const g of groups) {
-                const md = g.querySelector('div.markdown');
-                if (!md || !md.textContent || md.textContent.trim() === '\u200B') continue;
-                const isBot = !!g.querySelector('button[aria-label="Edit assistant message"]');
-                if (!isBot) lastUser = md.textContent.trim();
-              }
-              return lastUser;
-            }
+                          const root = document.querySelector('.scrollchatmessages') || document.body;
+                          const groups = Array.from(root.querySelectorAll('div.group[data-sentry-component="ChatMessage"]'));
+                          // While a generation is streaming, the LAST group is the bot's
+                          // partial (it has no "Edit assistant message" button yet, so the
+                          // isBot check would mislabel it). Skip the final group while
+                          // generating, then take the last remaining USER message.
+                          const generating = isGenerating();
+                          for (let i = groups.length - 1; i >= 0; i--) {
+                            if (generating && i === groups.length - 1) continue;
+                            const md = groups[i].querySelector('div.markdown');
+                            if (!md || !md.textContent || md.textContent.trim() === '\u200B') continue;
+                            const isBot = !!groups[i].querySelector('button[aria-label="Edit assistant message"]');
+                            if (!isBot) return md.textContent.trim();
+                          }
+                          // Fallback: no non-bot found (or not generating) — last group.
+                          const last = groups[groups.length - 1];
+                          const md = last && last.querySelector('div.markdown');
+                          return (md && md.textContent && md.textContent.trim() !== '\u200B') ? md.textContent.trim() : '';
+                        }
 
             function copyText(text) {
-              if (!text) return Promise.resolve(false);
-              try {
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                  return navigator.clipboard.writeText(text).then(() => true, () => false);
-                }
-                // Fallback: legacy execCommand path.
-                const ta = document.createElement('textarea');
-                ta.value = text;
-                ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
-                document.body.appendChild(ta);
-                ta.select();
-                let ok = false;
-                try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
-                ta.remove();
-                return Promise.resolve(ok);
-              } catch (_) { return Promise.resolve(false); }
-            }
+                          if (!text) return Promise.resolve(false);
+                          // Try the async clipboard API; on ANY rejection fall back to the
+                          // sync execCommand path. Never let a rejected promise hang the
+                          // flow — cap the wait at 1s so a pending write can't race the
+                          // page reload (which would lose the copy).
+                          const timeout = new Promise((res) => setTimeout(() => res(false), 1000));
+                          const attempt = (async () => {
+                            try {
+                              if (navigator.clipboard && navigator.clipboard.writeText) {
+                                await navigator.clipboard.writeText(text);
+                                return true;
+                              }
+                            } catch (_) { /* fall through to execCommand */ }
+                            try {
+                              const ta = document.createElement('textarea');
+                              ta.value = text;
+                              ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+                              document.body.appendChild(ta);
+                              ta.focus(); ta.select();
+                              let ok = false;
+                              try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+                              ta.remove();
+                              return ok;
+                            } catch (_) { return false; }
+                          })();
+                          return Promise.race([attempt, timeout]);
+                        }
 
             function copyUserOnStop() {
                           if (stopCopyDone) return;         // once per page load
                           stopCopyDone = true;
                           const lastUser = lastUserMessageText();
                           if (lastUser) {
-                            copyText(lastUser);
-                            // Persist the delete intent across the page reload: after the
-                            // refresh, the fresh content script deletes the message whose
-                            // text matches this (it should be gone from the live chat but
-                            // may survive as a stale copy in the reloaded page).
-                            try {
-                              chrome.storage.local.set({ djtfDeletePending: lastUser.slice(0, 4000) });
-                            } catch (_) {}
+                            // Copy FIRST, persist the delete intent only if the copy
+                            // succeeded — and delay any reload long enough for the write.
+                            copyText(lastUser).then((ok) => {
+                              if (ok) {
+                                try {
+                                  chrome.storage.local.set({ djtfDeletePending: lastUser.slice(0, 4000) });
+                                } catch (_) {}
+                              }
+                            });
                           }
+                        }
+
+                        // Normalize for tolerant message matching (DJ re-renders can change
+                        // whitespace/smart quotes between the captured text and the reloaded
+                        // DOM — exact === fails. Compare on whitespace-collapsed lowercase.)
+                        function normForMatch(s) {
+                          return String(s || '').toLowerCase().replace(/[^a-z0-9\u00C0-\u024F]+/g, ' ').trim();
                         }
 
                         // ── Post-refresh auto-delete of the copied message ──
@@ -642,19 +668,19 @@
                         const DELETE_PENDING_MAX_ATTEMPTS = 10;
 
                         function findPendingUserMessage(text) {
-                          const root = document.querySelector('.scrollchatmessages') || document.body;
-                          const groups = Array.from(root.querySelectorAll('div.group[data-sentry-component="ChatMessage"]'));
-                          const target = String(text || '').trim();
-                          if (!target) return null;
-                          for (const g of groups) {
-                            const md = g.querySelector('div.markdown');
-                            if (!md || !md.textContent) continue;
-                            const isBot = !!g.querySelector('button[aria-label="Edit assistant message"]');
-                            if (isBot) continue;
-                            if (md.textContent.trim() === target) return g;
-                          }
-                          return null;
-                        }
+                                                  const root = document.querySelector('.scrollchatmessages') || document.body;
+                                                  const groups = Array.from(root.querySelectorAll('div.group[data-sentry-component="ChatMessage"]'));
+                                                  const target = normForMatch(text);
+                                                  if (!target) return null;
+                                                  for (const g of groups) {
+                                                    const md = g.querySelector('div.markdown');
+                                                    if (!md || !md.textContent) continue;
+                                                    const isBot = !!g.querySelector('button[aria-label="Edit assistant message"]');
+                                                    if (isBot) continue;
+                                                    if (normForMatch(md.textContent) === target) return g;
+                                                  }
+                                                  return null;
+                                                }
 
                         function maybeDeletePendingMessage() {
                                                   chrome.storage.local.get(['djtfDeletePending'], (res) => {
