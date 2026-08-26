@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lucid (Mobile)
 // @namespace    lucid-mobile
-// @version      1.9.1
+// @version      1.9.2
 // @description  Mends DreamJourney thinking blocks on phones: broken fences, missing/swapped/typo'd thinking tags, plus a per-message fix button and empty-send continue. Desktop-extension logic bundled as a user script.
 // @author       Nyveria
 // @match        https://dreamjourneyai.com/app/*
@@ -870,13 +870,15 @@
               }
 
     // In-page toast (floats over the chat) for user-facing notices.
-    let toastTimer = null;
-    function showToast(msg) {
-      try {
-        let el = document.querySelector('[data-djtf-toast]');
-        if (!el) {
-          el = document.createElement('div');
-          el.setAttribute('data-djtf-toast', '1');
+        // NOTE: marker is "notice" — NOT the bare [data-djtf-toast] which would
+        // also capture the refresh countdown toast and clobber it.
+        let toastTimer = null;
+        function showToast(msg) {
+          try {
+            let el = document.querySelector('[data-djtf-toast="notice"]');
+            if (!el) {
+              el = document.createElement('div');
+              el.setAttribute('data-djtf-toast', 'notice');
           el.style.cssText = [
             'position:fixed','bottom:90px','left:50%','transform:translateX(-50%)',
             'z-index:99999','max-width:480px',
@@ -1353,6 +1355,9 @@
   // or vanishing-message bug (Aster's proven behavior, faithful port).
   // Only the exact stop button triggers it; nothing reloads unprompted.
   let refreshToastActive = false;
+  // Text we copied on Stop; only written to storage as the refresh fires, so
+  // the delete runs on the POST-refresh page — never on the arming page.
+  let stopCopyText = '';
 
   function showRefreshToast() {
     if (!autoRefresh || refreshToastActive) return;
@@ -1396,7 +1401,17 @@
         clearInterval(iv);
         try { t.remove(); } catch (_) {}
         refreshToastActive = false;
-        location.reload();
+        // Arm the post-refresh delete ONLY as we actually reload. This is the
+        // page that COPIES the message; the delete must run on the fresh page.
+        // If the user cancels, stopCopyText stays un-armed and nothing deletes.
+        const doReload = () => { try { location.reload(); } catch (_) {} };
+        if (stopCopyText) {
+          try {
+            chrome.storage.local.set({ djtfDeletePending: stopCopyText }, doReload);
+            return; // reload happens in the set callback (guarantees persistence)
+          } catch (_) { /* fall through */ }
+        }
+        doReload();
       }
     }, 1000);
   }
@@ -1527,12 +1542,15 @@
           try { showToast('\u26a0\ufe0f Couldn\u2019t find your last message to copy'); } catch (_) {}
           return;
         }
-        try {
-          chrome.storage.local.set({ djtfDeletePending: lastUser.slice(0, 4000) });
-        } catch (_) {}
+        // Hold the text; it is armed to djtfDeletePending only when the
+        // refresh actually fires (see showRefreshToast), so the orphan page
+        // never deletes its own message before reloading.
+        stopCopyText = lastUser.slice(0, 4000);
+        const willRefresh = autoRefresh;
         copyText(lastUser).then((ok) => {
           try {
-            showToast(ok ? '\u2713 Message copied \u2014 will auto-delete after refresh' : 'Message NOT copied (clipboard blocked), auto-delete armed');
+            const tail = willRefresh ? ' \u2014 will auto-delete after refresh' : '';
+            showToast(ok ? '\u2713 Message copied' + tail : 'Message NOT copied (clipboard blocked)');
           } catch (_) {}
         });
       }
