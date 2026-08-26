@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lucid (Mobile)
 // @namespace    lucid-mobile
-// @version      1.8.3
+// @version      1.8.4
 // @description  Mends DreamJourney thinking blocks on phones: broken fences, missing/swapped/typo'd thinking tags, plus a per-message fix button and empty-send continue. Desktop-extension logic bundled as a user script.
 // @author       Nyveria
 // @match        https://dreamjourneyai.com/app/*
@@ -854,7 +854,8 @@
 
         // ── Storage ──
         function loadState(cb) {
-          chrome.storage.local.get(['djtfStats', 'djtfContinue', 'djtfAutoRefresh', 'djtfSaveOnStop'], (res) => {
+              try { if (!chrome.runtime || !chrome.runtime.id) { if (cb) cb(); return; } } catch (_) { if (cb) cb(); return; }
+              chrome.storage.local.get(['djtfStats', 'djtfContinue', 'djtfAutoRefresh', 'djtfSaveOnStop'], (res) => {
             continueEnabled = res.djtfContinue !== false;
             autoRefresh = res.djtfAutoRefresh !== false;
             saveOnStop = res.djtfSaveOnStop !== false;
@@ -864,8 +865,9 @@
         }
 
         function saveState() {
-            chrome.storage.local.set({ djtfStats: stats, djtfContinue: continueEnabled, djtfAutoRefresh: autoRefresh, djtfSaveOnStop: saveOnStop });
-          }
+                try { if (!chrome.runtime || !chrome.runtime.id) return; } catch (_) { return; }
+                try { chrome.storage.local.set({ djtfStats: stats, djtfContinue: continueEnabled, djtfAutoRefresh: autoRefresh, djtfSaveOnStop: saveOnStop }); } catch (_) {}
+              }
 
     // In-page toast (floats over the chat) for user-facing notices.
     let toastTimer = null;
@@ -895,6 +897,7 @@
   function bumpStats(n) {
       stats.fixed += n;
       stats.lastAt = Date.now();
+      try { if (!chrome.runtime || !chrome.runtime.id) return; } catch (_) { return; }
       try { chrome.storage.local.set({ djtfStats: stats }); } catch (_) {}
     }
 
@@ -1520,6 +1523,12 @@
                                                 }
 
                         function maybeDeletePendingMessage() {
+                                                  // If the extension context was invalidated (reload/
+                                                  // update while this tab was open), chrome.runtime.id
+                                                  // is undefined — bail BEFORE touching any chrome.*
+                                                  // API so the 2.5s safety interval can't spam
+                                                  // "Extension context invalidated" errors.
+                                                  try { if (!chrome.runtime || !chrome.runtime.id) return; } catch (_) { return; }
                                                   try {
                                                     chrome.storage.local.get(['djtfDeletePending'], (res) => {
                                                       try {
