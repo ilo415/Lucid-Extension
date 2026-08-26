@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Lucid (Mobile)
 // @namespace    lucid-mobile
-// @version      1.9.0
+// @version      1.9.1
 // @description  Mends DreamJourney thinking blocks on phones: broken fences, missing/swapped/typo'd thinking tags, plus a per-message fix button and empty-send continue. Desktop-extension logic bundled as a user script.
 // @author       Nyveria
 // @match        https://dreamjourneyai.com/app/*
@@ -1418,122 +1418,126 @@
         }, true);
       }
 
-      // ── Copy on Stop ────────────────────────────────────────────
-                              // When Stop is clicked, copy the user's last message to the clipboard
-                              // so their prompt survives the page reload (DJ stops the bot's reply
-                              // itself — we only preserve the user's own words). Runs immediately;
-                              // Cancel on the refresh toast does NOT undo it (text is in clipboard).
-                              let stopCopyDone = false;
+      // ── Copy on Stop ─────────────────────────────
+      // On Stop, copy the user's last message to the clipboard so the
+      // prompt survives the reload. Runs immediately; Cancel on the
+      // refresh toast does NOT undo it (text is in clipboard).
+      let stopCopyDone = false;
 
-                        // A "user" message group is identified by DJ's own button labels
-                        // ("Edit user message", "Delete user message", "Copy user message").
-                        // Bot messages carry the "assistant" variants instead. This is the
-                        // ground-truth check — no guessing by position or generation state.
-                        function isUserGroup(g) {
-                          return !!g.querySelector(
-                            'button[aria-label="Edit user message"], button[aria-label="Delete user message"], button[aria-label="Copy user message"]'
-                          );
-                        }
-                        function isBotGroup(g) {
-                          return !!g.querySelector(
-                            'button[aria-label="Edit assistant message"], button[aria-label="Delete assistant message"], button[aria-label="Copy assistant message"]'
-                          );
-                        }
+      // The message container. On the live DJ page, messages are
+      // <div class="group ..."> WITHOUT data-sentry attributes (that was
+      // a stale assumption from fixtures). Buttons carry the real labels.
+      function findGroupOf(el) {
+        if (!el) return null;
+        return el.closest('.group') || el.parentElement;
+      }
+      function isUserGroup(g) {
+        return !!g && !!g.querySelector(
+          'button[aria-label="Edit user message"], button[aria-label="Delete user message"], button[aria-label="Copy user message"]'
+        );
+      }
+      function isBotGroup(g) {
+        return !!g && !!g.querySelector(
+          'button[aria-label="Edit assistant message"], button[aria-label="Delete assistant message"], button[aria-label="Copy assistant message"]'
+        );
+      }
+      function groupText(g) {
+        if (!g) return '';
+        const md = g.querySelector('div.markdown');
+        if (md && md.textContent) {
+          const t = md.textContent.trim();
+          return (t === '\u200B') ? '' : t;
+        }
+        const t = (g.textContent || '').trim();
+        return (t === '\u200B') ? '' : t;
+      }
+      // Enumerate USER message groups from the Delete/Edit/Copy user buttons.
+      function userMessageGroups() {
+        const root = document.querySelector('.scrollchatmessages') || document.body;
+        const map = new Map();
+        root.querySelectorAll(
+          'button[aria-label="Delete user message"], button[aria-label="Edit user message"], button[aria-label="Copy user message"]'
+        ).forEach((b) => { const g = findGroupOf(b); if (g) map.set(g, true); });
+        return Array.from(map.keys());
+      }
+      // Enumerate bot groups for exclusion (assistant buttons).
+      function botGroupSet() {
+        const root = document.querySelector('.scrollchatmessages') || document.body;
+        const set = new Set();
+        root.querySelectorAll(
+          'button[aria-label="Delete assistant message"], button[aria-label="Edit assistant message"], button[aria-label="Copy assistant message"]'
+        ).forEach((b) => { const g = findGroupOf(b); if (g) set.add(g); });
+        return set;
+      }
 
-                        function lastUserMessageText() {
-                                                                          const root = document.querySelector('.scrollchatmessages') || document.body;
-                                                                          const groups = Array.from(root.querySelectorAll('div.group[data-sentry-component="ChatMessage"]'));
-                                                                          const text = (g) => {
-                                                                            const md = g && g.querySelector('div.markdown');
-                                                                            if (!md || !md.textContent) return '';
-                                                                            const t = md.textContent.trim();
-                                                                            return (t === '\u200B') ? '' : t;
-                                                                          };
-                                                                          if (!groups.length) return '';
+      function lastUserMessageText() {
+        // Pass 1: user-labeled groups. The LAST one in DOM order is the
+        // user's most recent message.
+        const userGroups = userMessageGroups();
+        for (let i = userGroups.length - 1; i >= 0; i--) {
+          const t = groupText(userGroups[i]);
+          if (t) return t;
+        }
+        // Pass 2: no labeled groups (streaming). Crawl every .group, skip
+        // bot-labeled ones, and skip the trailing unlabeled streaming
+        // partial.
+        const root = document.querySelector('.scrollchatmessages') || document.body;
+        const all = Array.from(root.querySelectorAll('.group'));
+        const bots = botGroupSet();
+        const generating = isGenerating();
+        for (let i = all.length - 1; i >= 0; i--) {
+          if (bots.has(all[i])) continue;
+          if (generating && i === all.length - 1) continue;
+          const t = groupText(all[i]);
+          if (t) return t;
+        }
+        return '';
+      }
 
-                                                                          // Pass 1: explicit user-labeled groups (normal state).
-                                                                          for (let i = groups.length - 1; i >= 0; i--) {
-                                                                            if (isBotGroup(groups[i])) continue;
-                                                                            if (!isUserGroup(groups[i])) continue;
-                                                                            const t = text(groups[i]);
-                                                                            if (t) return t;
-                                                                          }
+      function copyText(text) {
+        if (!text) return Promise.resolve(false);
+        const timeout = new Promise((res) => setTimeout(() => res(false), 1000));
+        const attempt = (async () => {
+          try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              await navigator.clipboard.writeText(text);
+              return true;
+            }
+          } catch (_) { /* fall through to execCommand */ }
+          try {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+            document.body.appendChild(ta);
+            ta.focus(); ta.select();
+            let ok = false;
+            try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+            ta.remove();
+            return ok;
+          } catch (_) { return false; }
+        })();
+        return Promise.race([attempt, timeout]);
+      }
 
-                                                                          // Pass 2: walk backwards, skip assistant-labeled groups;
-                                                                                                                                                                                                                              // take the last non-bot group's text. Handles streaming
-                                                                                                                                                                                                                              // (partial has no labels yet) AND label-less users.
-                                                                                                                                                                                                                              // Robust streaming detection: if the LAST group has content
-                                                                                                                                                                                                                              // but NEITHER user NOR assistant action buttons, it's almost
-                                                                                                                                                                                                                              // certainly the in-flight bot partial — skip it. This works
-                                                                                                                                                                                                                              // even if isGenerating() races ahead of the click.
-                                                                                                                                                                                                                              const hasUserLabels = (g) => isUserGroup(g);
-                                                                                                                                                                                                                              const lastGroup = groups[groups.length - 1];
-                                                                                                                                                                                                                              const lastUnlabeled =
-                                                                                                                                                                                                                                lastGroup && !isBotGroup(lastGroup) && !hasUserLabels(lastGroup) &&
-                                                                                                                                                                                                                                text(lastGroup) !== '';
-                                                                                                                                                                                                                              const generating = isGenerating() || lastUnlabeled;
-                                                                                                                                                                                                                              const lastIdx = groups.length - 1;
-                                                                                                                                                                                                                              for (let i = lastIdx; i >= 0; i--) {
-                                                                                                                                                                                                                                if (generating && i === lastIdx) continue;
-                                                                                                                                                                                                                                if (isBotGroup(groups[i])) continue;
-                                                                                                                                                                                                                                const t = text(groups[i]);
-                                                                                                                                                                                                                                if (t) return t;
-                                                                                                                                                                                                                              }
-                                                                                                                                                                                                                              return '';
-                                                                        }
+      function copyUserOnStop() {
+        if (stopCopyDone) return;
+        stopCopyDone = true;
+        const lastUser = lastUserMessageText();
+        if (!lastUser) {
+          try { showToast('\u26a0\ufe0f Couldn\u2019t find your last message to copy'); } catch (_) {}
+          return;
+        }
+        try {
+          chrome.storage.local.set({ djtfDeletePending: lastUser.slice(0, 4000) });
+        } catch (_) {}
+        copyText(lastUser).then((ok) => {
+          try {
+            showToast(ok ? '\u2713 Message copied \u2014 will auto-delete after refresh' : 'Message NOT copied (clipboard blocked), auto-delete armed');
+          } catch (_) {}
+        });
+      }
 
-            function copyText(text) {
-                          if (!text) return Promise.resolve(false);
-                          // Try the async clipboard API; on ANY rejection fall back to the
-                          // sync execCommand path. Never let a rejected promise hang the
-                          // flow — cap the wait at 1s so a pending write can't race the
-                          // page reload (which would lose the copy).
-                          const timeout = new Promise((res) => setTimeout(() => res(false), 1000));
-                          const attempt = (async () => {
-                            try {
-                              if (navigator.clipboard && navigator.clipboard.writeText) {
-                                await navigator.clipboard.writeText(text);
-                                return true;
-                              }
-                            } catch (_) { /* fall through to execCommand */ }
-                            try {
-                              const ta = document.createElement('textarea');
-                              ta.value = text;
-                              ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
-                              document.body.appendChild(ta);
-                              ta.focus(); ta.select();
-                              let ok = false;
-                              try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
-                              ta.remove();
-                              return ok;
-                            } catch (_) { return false; }
-                          })();
-                          return Promise.race([attempt, timeout]);
-                        }
-
-            function copyUserOnStop() {
-                                                  if (stopCopyDone) return;         // once per page load
-                                                  stopCopyDone = true;
-                                                  const lastUser = lastUserMessageText();
-                                                  if (!lastUser) {
-                                                    try { showToast('⚠️ Couldn\u2019t find your last message to copy'); } catch (_) {}
-                                                    return;
-                                                  }
-                                                  // Set the delete-pending flag FIRST (regardless of
-                                                  // copy success — the delete should still happen if the
-                                                  // message is present after refresh; the copy is a bonus).
-                                                  try {
-                                                    chrome.storage.local.set({ djtfDeletePending: lastUser.slice(0, 4000) });
-                                                  } catch (_) {}
-                                                  // Copy to clipboard.
-                                                  copyText(lastUser).then((ok) => {
-                                                                                                      try {
-                                                                                                        showToast(ok ? '✓ Message copied — will auto-delete after refresh' : 'Message NOT copied (clipboard blocked), but auto-delete armed');
-                                                                                                      } catch (_) {}
-                                                                                                    });
-                                                                                      }
-
-                                                                          // Normalize for tolerant message matching (DJ re-renders can change
+                        // Normalize for tolerant message matching (DJ re-renders can change
                         // whitespace/smart quotes between the captured text and the reloaded
                         // DOM — exact === fails. Compare on whitespace-collapsed lowercase.)
                         function normForMatch(s) {
@@ -1549,28 +1553,22 @@
                         const DELETE_PENDING_MAX_ATTEMPTS = 10;
 
                         function findPendingUserMessage(text) {
-                                                                          const root = document.querySelector('.scrollchatmessages') || document.body;
-                                                                          const groups = Array.from(root.querySelectorAll('div.group[data-sentry-component="ChatMessage"]'));
-                                                                          const target = normForMatch(text);
-                                                                          if (!target) return null;
-                                                                          // Pass 1: user-labeled + text match.
-                                                                          for (const g of groups) {
-                                                                            const md = g.querySelector('div.markdown');
-                                                                            if (!md || !md.textContent) continue;
-                                                                            if (isBotGroup(g)) continue;
-                                                                            if (!isUserGroup(g)) continue;
-                                                                            if (normForMatch(md.textContent) === target) return g;
-                                                                          }
-                                                                          // Pass 2 (fallback): first non-bot group whose text matches
-                                                                          // (works when labels aren't rendered).
-                                                                          for (const g of groups) {
-                                                                            const md = g.querySelector('div.markdown');
-                                                                            if (!md || !md.textContent) continue;
-                                                                            if (isBotGroup(g)) continue;
-                                                                            if (normForMatch(md.textContent) === target) return g;
-                                                                          }
-                                                                          return null;
-                                                                        }
+                                                                                                                          const root = document.querySelector('.scrollchatmessages') || document.body;
+                                                                                                                          const target = normForMatch(text);
+                                                                                                                          if (!target) return null;
+                                                                                                                          // Pass 1: user-labeled groups with matching text.
+                                                                                                                          const userGroups = userMessageGroups();
+                                                                                                                          for (const g of userGroups) {
+                                                                                                                            if (normForMatch(groupText(g)) === target) return g;
+                                                                                                                          }
+                                                                                                                          // Pass 2: any non-bot .group with matching text.
+                                                                                                                          const bots = botGroupSet();
+                                                                                                                          for (const g of Array.from(root.querySelectorAll('.group, [data-sentry-component="ChatMessage"]'))) {
+                                                                                                                            if (bots.has(g)) continue;
+                                                                                                                            if (normForMatch(groupText(g)) === target) return g;
+                                                                                                                          }
+                                                                                                                          return null;
+                                                                                                                        }
 
                         function maybeDeletePendingMessage() {
                                                   // If the extension context was invalidated (reload/
