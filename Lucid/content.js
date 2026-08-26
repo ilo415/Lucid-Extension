@@ -683,34 +683,33 @@
                                                 }
 
                         function maybeDeletePendingMessage() {
-                                                  chrome.storage.local.get(['djtfDeletePending'], (res) => {
-                                                    const pending = res && res.djtfDeletePending;
-                                                    if (!pending) return;
-                                                    const g = findPendingUserMessage(pending);
-                                                    if (!g) {
-                                                      // Not rendered yet or already gone. Retry a bounded number of
-                                                      // times across the safety interval, then give up + clear.
-                                                      deletePendingAttempts++;
-                                                      if (deletePendingAttempts > DELETE_PENDING_MAX_ATTEMPTS) {
-                                                        chrome.storage.local.remove(['djtfDeletePending']);
-                                                        deletePendingAttempts = 0;
-                                                      }
-                                                      return;
-                                                    }
-                            // Found it — click its own delete control (React-safe).
-                            g.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
-                            setTimeout(() => {
-                              const trash = g.querySelector('svg.lucide.lucide-trash2, svg.lucide-trash-2');
-                              const delBtn = trash ? trash.closest('button') : null;
-                              if (delBtn) {
-                                delBtn.click();
-                                chrome.storage.local.remove(['djtfDeletePending']);
-                              } else {
-                                chrome.storage.local.remove(['djtfDeletePending']); // can't find the control — stop trying
-                              }
-                            }, 150);
-                          });
-                        }
+                                                  try {
+                                                    chrome.storage.local.get(['djtfDeletePending'], (res) => {
+                                                      try {
+                                                        const pending = res && res.djtfDeletePending;
+                                                        if (!pending) return;
+                                                        const g = findPendingUserMessage(pending);
+                                                        if (!g) {
+                                                          deletePendingAttempts++;
+                                                          if (deletePendingAttempts > DELETE_PENDING_MAX_ATTEMPTS) {
+                                                            try { chrome.storage.local.remove(['djtfDeletePending']); } catch (_) {}
+                                                            deletePendingAttempts = 0;
+                                                          }
+                                                          return;
+                                                        }
+                                                        g.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
+                                                        setTimeout(() => {
+                                                          try {
+                                                            const trash = g.querySelector('svg.lucide.lucide-trash2, svg.lucide-trash-2');
+                                                            const delBtn = trash ? trash.closest('button') : null;
+                                                            if (delBtn) delBtn.click();
+                                                          } catch (_) {}
+                                                          try { chrome.storage.local.remove(['djtfDeletePending']); } catch (_) {}
+                                                        }, 150);
+                                                      } catch (_) {}
+                                                    });
+                                                  } catch (_) {}
+                                                }
 
   // ── Observers ──
   const injectObs = new MutationObserver(() => {
