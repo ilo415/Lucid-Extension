@@ -698,25 +698,39 @@
       }
 
       function copyUserOnStop() {
-        if (stopCopyDone) return;
-        stopCopyDone = true;
-        const lastUser = lastUserMessageText();
-        if (!lastUser) {
-          try { showToast('\u26a0\ufe0f Couldn\u2019t find your last message to copy'); } catch (_) {}
-          return;
-        }
-        // Hold the text; it is armed to djtfDeletePending only when the
-        // refresh actually fires (see showRefreshToast), so the orphan page
-        // never deletes its own message before reloading.
-        stopCopyText = lastUser.slice(0, 4000);
-        const willRefresh = autoRefresh;
-        copyText(lastUser).then((ok) => {
-          try {
-            const tail = willRefresh ? ' \u2014 will auto-delete after refresh' : '';
-            showToast(ok ? '\u2713 Message copied' + tail : 'Message NOT copied (clipboard blocked)');
-          } catch (_) {}
-        });
-      }
+              if (stopCopyDone) return;
+              stopCopyDone = true;
+              const lastUser = lastUserMessageText();
+              if (!lastUser) {
+                try { showToast('\u26a0\ufe0f Couldn\u2019t find your last message to copy'); } catch (_) {}
+                return;
+              }
+              // Hold the text; it is armed to djtfDeletePending only when the
+              // refresh actually fires (see showRefreshToast), so the orphan page
+              // never deletes its own message before reloading.
+              stopCopyText = lastUser.slice(0, 4000);
+              const willRefresh = autoRefresh;
+              const tail = willRefresh ? ' \u2014 will auto-delete after refresh' : '';
+
+              // Prefer DJ's OWN "Copy user message" button — it copies the exact
+              // raw source (blank lines preserved), unlike our DOM-text
+              // reconstruction which normalizes whitespace. Fall back to our
+              // textarea copy only if the button isn't available.
+              const userGroups = userMessageGroups();
+              const lastGroup = userGroups[userGroups.length - 1];
+              const copyBtn = lastGroup && lastGroup.querySelector('button[aria-label="Copy user message"]');
+              if (copyBtn) {
+                copyBtn.click();
+                try { showToast('\u2713 Message copied' + tail); } catch (_) {}
+                return;
+              }
+
+              copyText(lastUser).then((ok) => {
+                try {
+                  showToast(ok ? '\u2713 Message copied' + tail : 'Message NOT copied (clipboard blocked)');
+                } catch (_) {}
+              });
+            }
 
                         // Normalize for tolerant message matching (DJ re-renders can change
                         // whitespace/smart quotes between the captured text and the reloaded
