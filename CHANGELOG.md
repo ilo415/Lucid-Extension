@@ -94,18 +94,18 @@ are grouped newest-first.
 
 ### Added
 - **Auto-refresh on Stop.** Clicking `Stop generating` opens a 3-second
-  cancel-able countdown that reloads the page, reducing double / vanishing
-  message bugs. Faithful port of Aster's behavior.
+  cancelable countdown that reloads the page, reducing duplicate / vanishing
+  message bugs.
 
 ## [1.5] — 2026-08-26
 
 ### Added
 - **Structure-shift reply detection.** When `</thinking>` is missing, detect the
   thinking→prose boundary by structure (list/header lines vs a sustained prose
-  run) — no per-user conventions. If prose exists but no confident boundary, flag
-  the message **ambiguous** and tell the user to fix or reroll instead of hiding
-  their reply. Missing-closer blocks that are all thinking-style lines close
-  safely at the end.
+  run). If prose exists but no confident boundary, flag the message
+  **ambiguous** and tell the user to fix or reroll instead of hiding their
+  reply. Missing-closer blocks that are all thinking-style lines close safely at
+  the end.
 
 ## [1.4] — 2026-08-26
 
@@ -130,9 +130,10 @@ are grouped newest-first.
 ## [1.2] — 2026-08-26
 
 ### Removed
-- **CAS headers as a reply boundary** (user prompt convention, like SEER earlier).
-  Only the closing fence remains a boundary. Removed the SEER/CAS coupling from
-  the no-closer detection.
+- **Reply-boundary detection simplified.** Only a closing code fence is now used
+  to delimit the end of a thinking block. The prior heuristics around message
+  headers are gone, so behavior no longer depends on any particular message
+  layout.
 
 ## [1.1] — 2026-08-26
 
@@ -154,18 +155,9 @@ are grouped newest-first.
 
 ## [0.x] — *DJ Thinking Fixer* era
 
-- Removed SEER/director prose as a detection signal (it's the user's system
-  prompt, not bot output).
-- Removed background auto-fix and collapse (manual per-message wand only).
-- Empty-send **continue** feature (GhostBuddy-style): force-enable send on an
-  empty composer, inject a zero-width space, delete the invisible bubble after
-  the reply.
+- Removed background auto-fix and collapse (manual per-message action only).
+- Empty-send **continue**: force-enable send on an empty composer, inject a
+  zero-width space, delete the invisible placeholder after the reply.
 - Repairs via DreamJourney's own edit dialog (React-safe): missing fences/tags,
   swapped tags, typos, stray inner fences, fused fences, curly-quote
   normalization.
-
----
-
-## Unreleased / Roadmap
-
-- Subscription/OAuth tier for the AI assistant (ChatGPT/Grok login) — deferred.
