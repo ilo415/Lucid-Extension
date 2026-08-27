@@ -165,18 +165,6 @@
     });
   }
 
-  // Inspect/repair whatever edit dialog is CURRENTLY open (user opened Edit
-  // manually and hit Scan). The dialog's textarea is ground truth — we don't
-  // need to know which message it belongs to.
-  async function fixOpenDialog() {
-    const dialog = document.querySelector('div[role="dialog"]');
-    const textarea = dialog?.querySelector('textarea');
-    if (!textarea) return { fixed: 0, via: 'no-dialog' };
-    const res = await fixTextarea(textarea, dialog);
-    if (res.fixed) bumpStats(res.fixed);
-    return res;
-  }
-
   // Opens (or reuses) DJ's edit dialog for a specific message, reads the raw
   // source, rebuilds if malformed, saves. React-safe: only drives DJ's own
   // controls. If a dialog is already open we never stack a second one.
@@ -881,19 +869,6 @@
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       try {
         switch (msg.action) {
-          case 'scan':
-            // If the user has Edit open right now, fix that dialog directly.
-            // The dialog fix is async; resolve via .then so the listener
-            // returns true immediately and the channel stays open.
-            fixOpenDialog().then((res) => {
-              try {
-                if (res.via === 'no-dialog') injectFixButtons();
-                sendResponse({ ok: true, fixed: res.fixed, via: res.via });
-              } catch (_) {}
-            }).catch(() => {
-              try { sendResponse({ ok: true, fixed: 0, via: 'no-dialog' }); } catch (_) {}
-            });
-            break;
           case 'getState':
                       sendResponse({ stats, cont: continueEnabled, autoRefresh, saveOnStop });
                       break;

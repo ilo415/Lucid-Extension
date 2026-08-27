@@ -71,7 +71,7 @@ Lucid/
 ├── fixer-core.js       normalizer + DOM repair + mini markdown
 ├── content.js          observer / settle detection / messaging
 ├── styles.css          collapse pill + block styling
-├── popup.html/js       toggles, stats, scan button
+├── popup.html/js       toggles, stats
 ├── icons/              generated icons
 └── test/               fixture test page (open in a browser)
 ```

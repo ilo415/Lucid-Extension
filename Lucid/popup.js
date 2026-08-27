@@ -56,18 +56,6 @@ document.addEventListener('DOMContentLoaded', () => {
     flash(e.target.checked ? 'Copy + delete on Stop enabled' : 'Copy + delete on Stop disabled');
   });
 
-  document.getElementById('btn-scan').addEventListener('click', async () => {
-    const resp = await send('scan');
-    if (resp?.ok) {
-      if (resp.fixed) flash(`Fixed ${resp.fixed} thinking block(s) ✓`);
-      else if (resp.via === 'no-dialog') flash('Scanned — fix buttons injected');
-      else if (resp.via === 'ambiguous') flash('Couldn\u2019t find reply start — edit or reroll', '#fbbf24');
-      else flash('That message looks clean');
-    } else {
-      flash('Open the chat page first', '#f87171');
-    }
-  });
-
   document.getElementById('btn-reset').addEventListener('click', async () => {
     await send('resetStats');
     refresh();
