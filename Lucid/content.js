@@ -509,6 +509,10 @@
   // Text we copied on Stop; only written to storage as the refresh fires, so
   // the delete runs on the POST-refresh page — never on the arming page.
   let stopCopyText = '';
+  // True from the moment this page arms the delete flag until it reloads. The
+  // safety interval may tick in the window between arming and navigation, and
+  // must NOT delete on the page that armed it — the fresh page does that.
+  let deleteJustArmed = false;
 
   function showRefreshToast() {
     if (!autoRefresh || refreshToastActive) return;
@@ -558,6 +562,9 @@
         const doReload = () => { try { location.reload(); } catch (_) {} };
         if (stopCopyText) {
           try {
+            // This page armed the flag — mark it so no interval tick deletes
+            // here before the reload navigates.
+            deleteJustArmed = true;
             chrome.storage.local.set({ djtfDeletePending: stopCopyText }, doReload);
             return; // reload happens in the set callback (guarantees persistence)
           } catch (_) { /* fall through */ }
@@ -750,6 +757,10 @@
                                                   // API so the 2.5s safety interval can't spam
                                                   // "Extension context invalidated" errors.
                                                   try { if (!chrome.runtime || !chrome.runtime.id) return; } catch (_) { return; }
+                                                  // If THIS page armed the pending flag, don't delete here —
+                                                  // the reload is imminent and the fresh page does the delete.
+                                                  // This page's interval must never delete before navigating.
+                                                  if (deleteJustArmed) return;
                                                   try {
                                                     chrome.storage.local.get(['djtfDeletePending'], (res) => {
                                                       try {
