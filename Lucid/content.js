@@ -735,150 +735,147 @@
               });
             }
 
-                        // Normalize for tolerant message matching (DJ re-renders can change
-                        // whitespace/smart quotes between the captured text and the reloaded
-                        // DOM — exact === fails. Compare on whitespace-collapsed lowercase.)
-                        function normForMatch(s) {
-                          return String(s || '').toLowerCase().replace(/[^a-z0-9\u00C0-\u024F]+/g, ' ').trim();
-                        }
+      // Normalize for tolerant message matching (DJ re-renders can change
+      // whitespace/smart quotes between the captured text and the reloaded
+      // DOM — exact === fails. Compare on whitespace-collapsed lowercase.)
+      function normForMatch(s) {
+        return String(s || '').toLowerCase().replace(/[^a-z0-9\u00C0-\u024F]+/g, ' ').trim();
+      }
 
-                        // ── Post-refresh auto-delete of the copied message ──
-                        // After a reload, if a delete-pending text was saved, find the
-                        // matching USER message in the chat and click its own delete
-                        // button (React-safe). Retry a few times in case the chat loads
-                        // lazily; clear the flag once found+deleted, or after giving up.
-                        let deletePendingAttempts = 0;
-                        const DELETE_PENDING_MAX_ATTEMPTS = 10;
+      // ── Post-refresh auto-delete of the copied message ──
+      // After a reload, if a delete-pending text was saved, find the matching
+      // USER message in the chat and click its own delete button (React-safe).
+      // Retry a few times in case the chat loads lazily; clear the flag once
+      // found+deleted, or after giving up.
+      let deletePendingAttempts = 0;
+      const DELETE_PENDING_MAX_ATTEMPTS = 10;
 
-                        function findPendingUserMessage(text) {
-                                                                                                                          const root = document.querySelector('.scrollchatmessages') || document.body;
-                                                                                                                          const target = normForMatch(text);
-                                                                                                                          if (!target) return null;
-                                                                                                                          // Pass 1: user-labeled groups with matching text.
-                                                                                                                          const userGroups = userMessageGroups();
-                                                                                                                          for (const g of userGroups) {
-                                                                                                                            if (normForMatch(groupText(g)) === target) return g;
-                                                                                                                          }
-                                                                                                                          // Pass 2: any non-bot .group with matching text.
-                                                                                                                          const bots = botGroupSet();
-                                                                                                                          for (const g of Array.from(root.querySelectorAll('.group'))) {
-                                                                                                                            if (bots.has(g)) continue;
-                                                                                                                            if (normForMatch(groupText(g)) === target) return g;
-                                                                                                                          }
-                                                                                                                          return null;
-                                                                                                                        }
+      function findPendingUserMessage(text) {
+        const root = document.querySelector('.scrollchatmessages') || document.body;
+        const target = normForMatch(text);
+        if (!target) return null;
+        // Pass 1: user-labeled groups with matching text.
+        const userGroups = userMessageGroups();
+        for (const g of userGroups) {
+          if (normForMatch(groupText(g)) === target) return g;
+        }
+        // Pass 2: any non-bot .group with matching text.
+        const bots = botGroupSet();
+        for (const g of Array.from(root.querySelectorAll('.group'))) {
+          if (bots.has(g)) continue;
+          if (normForMatch(groupText(g)) === target) return g;
+        }
+        return null;
+      }
 
-                        function maybeDeletePendingMessage() {
-                                                  // If the extension context was invalidated (reload/
-                                                  // update while this tab was open), chrome.runtime.id
-                                                  // is undefined — bail BEFORE touching any chrome.*
-                                                  // API so the 2.5s safety interval can't spam
-                                                  // "Extension context invalidated" errors.
-                                                  try { if (!chrome.runtime || !chrome.runtime.id) return; } catch (_) { return; }
-                                                  // If THIS page armed the pending flag, don't delete here —
-                                                  // the reload is imminent and the fresh page does the delete.
-                                                  // This page's interval must never delete before navigating.
-                                                  if (deleteJustArmed) return;
-                                                  try {
-                                                    chrome.storage.local.get(['djtfDeletePending', 'djtfDeleteSession'], (res) => {
-                                                      try {
-                                                        const pending = res && res.djtfDeletePending;
-                                                        if (!pending) return;
-                                                        // CROSS-TAB GUARD: the flag is tagged with the session id of
-                                                        // the tab that armed it. If it doesn't match THIS tab, this
-                                                        // is a different tab's pending delete (user is roleplaying in
-                                                        // two tabs) — never delete here. Only the owning tab (after
-                                                        // its own refresh) performs the delete.
-                                                        if (res.djtfDeleteSession !== tabSessionId) return;
-                                                        let g = findPendingUserMessage(pending);
-                                                        // If exact text matching keeps failing (the copied text can
-                                                        // differ from the post-refresh DOM — e.g. a thinking block
-                                                        // inside the user message, or markdown whitespace drift),
-                                                        // fall back to the LAST user message: the flag was armed for
-                                                        // "the user's last message at Stop time", so once the pending
-                                                        // flag has survived a few attempts it's the right target.
-                                                        if (!g) {
-                                                          deletePendingAttempts++;
-                                                          if (deletePendingAttempts >= 3) {
-                                                            const userGroups = userMessageGroups();
-                                                            if (userGroups.length) g = userGroups[userGroups.length - 1];
-                                                          }
-                                                        }
-                                                        if (!g) {
-                                                          if (deletePendingAttempts > DELETE_PENDING_MAX_ATTEMPTS) {
-                                                            try { chrome.storage.local.remove(['djtfDeletePending']); } catch (_) {}
-                                                            deletePendingAttempts = 0;
-                                                          }
-                                                          return;
-                                                        }
-                                                        // Click DJ's own "Delete user message" button by aria-label —
-                                                        // far more reliable than hunting the trash icon (the button
-                                                        // exists even while invisible until hover).
-                                                        const delBtn = g.querySelector('button[aria-label="Delete user message"]');
-                                                        if (!delBtn) {
-                                                          // Can't find the delete control — stop trying.
-                                                          try { chrome.storage.local.remove(['djtfDeletePending']); } catch (_) {}
-                                                          return;
-                                                        }
-                                                        delBtn.click();
-                                                        // DJ then shows a confirmation modal ("Delete Message?")
-                                                        // with a Cancel / red Delete button. Click the Delete
-                                                        // confirm. The modal renders async, so poll briefly.
-                                                        confirmDeleteDialog();
-                                                      } catch (_) { try { chrome.storage.local.remove(['djtfDeletePending']); } catch (_) {} }
-                                                    });
-                                                  } catch (_) {}
-                                                }
+      function maybeDeletePendingMessage() {
+        // If the extension context was invalidated (reload/update while this
+        // tab was open), chrome.runtime.id is undefined — bail BEFORE touching
+        // any chrome.* API so the 2.5s safety interval can't spam "Extension
+        // context invalidated" errors.
+        try { if (!chrome.runtime || !chrome.runtime.id) return; } catch (_) { return; }
+        // If THIS page armed the pending flag, don't delete here — the reload is
+        // imminent and the fresh page does the delete. This page's interval must
+        // never delete before navigating.
+        if (deleteJustArmed) return;
+        try {
+          chrome.storage.local.get(['djtfDeletePending', 'djtfDeleteSession'], (res) => {
+            try {
+              const pending = res && res.djtfDeletePending;
+              if (!pending) return;
+              // CROSS-TAB GUARD: the flag is tagged with the session id of the
+              // tab that armed it. If it doesn't match THIS tab, this is a
+              // different tab's pending delete (user roleplaying in two tabs) —
+              // never delete here. Only the owning tab (after its own refresh)
+              // performs the delete.
+              if (res.djtfDeleteSession !== tabSessionId) return;
+              let g = findPendingUserMessage(pending);
+              // If exact text matching keeps failing (the copied text can differ
+              // from the post-refresh DOM — e.g. a thinking block inside the user
+              // message, or markdown whitespace drift), fall back to the LAST
+              // user message: the flag was armed for "the user's last message at
+              // Stop time", so once the flag has survived a few attempts it's the
+              // right target.
+              if (!g) {
+                deletePendingAttempts++;
+                if (deletePendingAttempts >= 3) {
+                  const userGroups = userMessageGroups();
+                  if (userGroups.length) g = userGroups[userGroups.length - 1];
+                }
+              }
+              if (!g) {
+                if (deletePendingAttempts > DELETE_PENDING_MAX_ATTEMPTS) {
+                  try { chrome.storage.local.remove(['djtfDeletePending']); } catch (_) {}
+                  deletePendingAttempts = 0;
+                }
+                return;
+              }
+              // Click DJ's own "Delete user message" button by aria-label — far
+              // more reliable than hunting the trash icon (the button exists even
+              // while invisible until hover).
+              const delBtn = g.querySelector('button[aria-label="Delete user message"]');
+              if (!delBtn) {
+                // Can't find the delete control — stop trying.
+                try { chrome.storage.local.remove(['djtfDeletePending']); } catch (_) {}
+                return;
+              }
+              delBtn.click();
+              // DJ then shows a confirmation modal ("Delete Message?") with a
+              // Cancel / red Delete button. Click the Delete confirm. The modal
+              // renders async, so poll briefly.
+              confirmDeleteDialog();
+            } catch (_) { try { chrome.storage.local.remove(['djtfDeletePending']); } catch (_) {} }
+          });
+        } catch (_) {}
+      }
 
-                        // Click the red "Delete" confirm in DJ's "Delete Message?"
-                        // confirmation modal. The modal is a floating dialog
-                        // (Radix portal) with the heading, so locate it by that
-                        // heading, then click its Delete button. Poll a few times
-                        // because the dialog animates in.
-                        function confirmDeleteDialog() {
-                          let tries = 0;
-                          const MAX = 12;
-                          const attempt = () => {
-                            tries++;
-                            try {
-                              // Find the heading element exactly matching the modal title.
-                              let heading = null;
-                              document.querySelectorAll('h2').forEach((h) => {
-                                if (heading) return;
-                                const tx = (h.textContent || '').trim();
-                                if (tx === 'Delete Message?') heading = h;
-                              });
-                              if (!heading) { headlessRetry(); return; }
-                              // The modal container wraps the heading + buttons.
-                              const modal = heading.closest('[role="dialog"]') ||
-                                            heading.closest('div[class*="bg-black/90"]') ||
-                                            heading.parentElement;
-                              if (!modal) { headlessRetry(); return; }
-                              // Click the confirm button: red "Delete" (never "Cancel").
-                              const btns = Array.from(modal.querySelectorAll('button'));
-                              for (const b of btns) {
-                                const bt = (b.textContent || '').trim();
-                                if (bt === 'Delete') {
-                                  b.click();
-                                  // Done — clear the pending flag so we don't redo it.
-                                  try { chrome.storage.local.remove(['djtfDeletePending']); } catch (_) {}
-                                  return;
-                                }
-                              }
-                              headlessRetry();
-                            } catch (_) { headlessRetry(); }
-                          };
-                          const headlessRetry = () => {
-                            if (tries >= MAX) {
-                              // Give up on the confirm; drop the flag so we don't
-                              // keep retrying forever.
-                              try { chrome.storage.local.remove(['djtfDeletePending']); } catch (_) {}
-                              return;
-                            }
-                            setTimeout(attempt, 250);
-                          };
-                          attempt();
-                        }
+      // Click the red "Delete" confirm in DJ's "Delete Message?" confirmation
+      // modal. The modal is a floating dialog (Radix portal) with the heading,
+      // so locate it by that heading, then click its Delete button. Poll a few
+      // times because the dialog animates in.
+      function confirmDeleteDialog() {
+        let tries = 0;
+        const MAX = 12;
+        const attempt = () => {
+          tries++;
+          try {
+            // Find the heading element exactly matching the modal title.
+            let heading = null;
+            document.querySelectorAll('h2').forEach((h) => {
+              if (heading) return;
+              const tx = (h.textContent || '').trim();
+              if (tx === 'Delete Message?') heading = h;
+            });
+            if (!heading) { headlessRetry(); return; }
+            // The modal container wraps the heading + buttons.
+            const modal = heading.closest('[role="dialog"]') ||
+                          heading.closest('div[class*="bg-black/90"]') ||
+                          heading.parentElement;
+            if (!modal) { headlessRetry(); return; }
+            // Click the confirm button: red "Delete" (never "Cancel").
+            const btns = Array.from(modal.querySelectorAll('button'));
+            for (const b of btns) {
+              const bt = (b.textContent || '').trim();
+              if (bt === 'Delete') {
+                b.click();
+                // Done — clear the pending flag so we don't redo it.
+                try { chrome.storage.local.remove(['djtfDeletePending']); } catch (_) {}
+                return;
+              }
+            }
+            headlessRetry();
+          } catch (_) { headlessRetry(); }
+        };
+        const headlessRetry = () => {
+          if (tries >= MAX) {
+            // Give up on the confirm; drop the flag so we don't keep retrying forever.
+            try { chrome.storage.local.remove(['djtfDeletePending']); } catch (_) {}
+            return;
+          }
+          setTimeout(attempt, 250);
+        };
+        attempt();
+      }
 
   // ── Observers ──
   const injectObs = new MutationObserver(() => {
@@ -889,53 +886,53 @@
   let injectTimer = null;
 
   function start() {
-        injectObs.observe(document.body, { childList: true, subtree: true });
-        hookComposer();
-        hookStopButton();
-        setInterval(() => { injectFixButtons(); maybeEnableSend(); maybeDeletePendingMessage(); }, SAFETY_INTERVAL);
-        // Initial button pass after the app has had time to settle.
-        setTimeout(injectFixButtons, 4000);
-        // If a delete-pending flag survived the reload, start looking for the
-        // matching message (chat may load lazily).
-        setTimeout(maybeDeletePendingMessage, 3000);
-      }
+    injectObs.observe(document.body, { childList: true, subtree: true });
+    hookComposer();
+    hookStopButton();
+    setInterval(() => { injectFixButtons(); maybeEnableSend(); maybeDeletePendingMessage(); }, SAFETY_INTERVAL);
+    // Initial button pass after the app has had time to settle.
+    setTimeout(injectFixButtons, 4000);
+    // If a delete-pending flag survived the reload, start looking for the
+    // matching message (chat may load lazily).
+    setTimeout(maybeDeletePendingMessage, 3000);
+  }
 
   // ── Messaging (popup) ──
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-      try {
-        switch (msg.action) {
-          case 'getState':
-                      sendResponse({ stats, cont: continueEnabled, autoRefresh, saveOnStop });
-                      break;
-                    case 'setAutoRefresh':
-                      autoRefresh = !!msg.value;
-                      saveState();
-                      sendResponse({ ok: true });
-                      break;
-                    case 'setSaveOnStop':
-                      saveOnStop = !!msg.value;
-                      saveState();
-                      sendResponse({ ok: true });
-                      break;
-          case 'setContinue':
-            continueEnabled = !!msg.value;
-            saveState();
-            if (continueEnabled) maybeEnableSend();
-            sendResponse({ ok: true });
-            break;
-          case 'resetStats':
-            stats = { fixed: 0, lastAt: null };
-            chrome.storage.local.set({ djtfStats: stats });
-            sendResponse({ ok: true });
-            break;
-          default:
-            sendResponse({ ok: false });
-        }
-      } catch (e) {
-        sendResponse({ ok: false, error: String(e) });
+    try {
+      switch (msg.action) {
+        case 'getState':
+          sendResponse({ stats, cont: continueEnabled, autoRefresh, saveOnStop });
+          break;
+        case 'setAutoRefresh':
+          autoRefresh = !!msg.value;
+          saveState();
+          sendResponse({ ok: true });
+          break;
+        case 'setSaveOnStop':
+          saveOnStop = !!msg.value;
+          saveState();
+          sendResponse({ ok: true });
+          break;
+        case 'setContinue':
+          continueEnabled = !!msg.value;
+          saveState();
+          if (continueEnabled) maybeEnableSend();
+          sendResponse({ ok: true });
+          break;
+        case 'resetStats':
+          stats = { fixed: 0, lastAt: null };
+          chrome.storage.local.set({ djtfStats: stats });
+          sendResponse({ ok: true });
+          break;
+        default:
+          sendResponse({ ok: false });
       }
-      return true;
-    });
+    } catch (e) {
+      sendResponse({ ok: false, error: String(e) });
+    }
+    return true;
+  });
 
   loadState(() => {
     if (document.readyState === 'complete') start();

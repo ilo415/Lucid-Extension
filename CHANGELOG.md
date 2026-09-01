@@ -7,6 +7,54 @@ are grouped newest-first.
 
 ---
 
+## [1.10.9] — 2026-08-26
+
+### Added
+- **[BRAIN]: detection covers the reply text.** The `[BRAIN]` / `[BRAIN]:`
+  junk marker was only stripped when it appeared inside the thinking block. If
+  a well-formed block was followed by `[BRAIN]:` at the top of the reply prose,
+  the message looked healthy and never got a wand. Detection now scans the whole
+  message, so the marker is caught and stripped wherever it lands.
+
+### Changed
+- **Code cleanup pass.** Re-indented the copy/delete/confirm region that
+  patch churn had pushed to 124 spaces of nesting (now a clean 2-space block);
+  fixed the messaging switch + `start()` indentation; removed the last stale
+  `data-sentry-component` from the continue fixture; updated the local
+  `readme.md` to match current features (removed dead Scan/collapse/settle
+  references); fixed the popup footer from the stale "v1.0" to a descriptive
+  tagline. No behavior change.
+
+## [1.10.8] — 2026-08-26
+
+### Fixed
+- **Auto-delete scoped to the tab that armed it.** With two roleplay tabs open,
+  the pending-delete flag lived in shared storage, so tab B could pick up tab
+  A's delete. Each tab now tags the flag with a per-tab session id
+  (`sessionStorage`); only the owning tab (after its own refresh) performs the
+  delete.
+
+## [1.10.7] — 2026-08-26
+
+### Fixed
+- **Never delete on the page that armed the flag.** A rare race could delete
+  the message before the refresh fired. The arming page now skips deletion; only
+  the post-refresh page deletes.
+
+## [1.10.6] — 2026-08-26
+
+### Removed
+- **"Scan page now" button.** The per-message wand makes a full-page scan
+  redundant. Removed the button, its message handler, and the now-orphaned
+  dialog-scan helper.
+
+## [1.10.5] — 2026-08-26
+
+### Fixed
+- **Empty-send continue cleanup on live pages.** The zero-width bubble finder
+  still used a stale `data-sentry` selector, so the invisible placeholder was
+  never removed. Now uses the real `div.group` structure.
+
 ## [1.10.4] — 2026-08-26
 
 ### Fixed

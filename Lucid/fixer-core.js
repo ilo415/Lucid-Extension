@@ -538,6 +538,13 @@
       const full = el.innerText || el.textContent || '';
       if (hasCurlyQuotes(full)) return true;
 
+      // [BRAIN] / [BRAIN]: is model junk wherever it appears — in the thinking
+      // body OR at the top of the reply prose. A well-formed block with
+      // "[BRAIN]:" leaked into the response would otherwise pass the native-box
+      // check below and never get a wand, leaving the marker visible. Check the
+      // full message text, not just the thinking region.
+      if (BRAIN_RE.test(full)) return true;
+
       if (native) {
         // DJ parsed a block. Only fix when malformation is VISIBLE inside:
         // stray fences, [BRAIN] junk, or thinking tags that aren't healthy.
