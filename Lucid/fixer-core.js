@@ -192,7 +192,15 @@
     // markers, unambiguous even without SEER/director content. Anything
     // after the closing fence is the response.
     if (!tags.length) {
-      const fencedMatch = /^\s*```+\s*\n?([\s\S]*?)\n?\s*```+\s*([\s\S]*)$/.exec(text);
+      // [BRAIN]: prefix before the fence — strip it so the fenced regex
+      // below can match the actual thinking content. Only strip the marker,
+      // not the fence itself.
+      let workingText = text;
+      const brainPrefix = /^\s*\[brain\][\s:]*/is.exec(text);
+      if (brainPrefix) {
+        workingText = text.slice(brainPrefix[0].length);
+      }
+      const fencedMatch = /^\s*```+\s*\n?([\s\S]*?)\n?\s*```+\s*([\s\S]*)$/.exec(workingText);
       if (fencedMatch) {
         let body = fencedMatch[1];
         let rest = fencedMatch[2].replace(/^\s*\n+/, '').trim();

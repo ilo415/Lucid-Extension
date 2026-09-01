@@ -155,6 +155,18 @@ function check(name, actual, expected) {
   check('11d [BRAIN] stripped from rest', !(r.rest || '').includes('[BRAIN]'), true);
   check('11d prose kept', (r.rest || '').includes('She walked across'), true);
 }
+{
+  // 11e: [BRAIN]: + fenced code block with NO thinking tags — the model
+  // emitted thinking as a fenced block with a [BRAIN] marker instead of
+  // using <thinking> tags. The marker must be stripped and the fenced content
+  // become a <thinking> block, reply preserved.
+  const text = '[BRAIN]:\n```\nSTARTING ROLEPLAY DIRECTOR:\n1) scene analysis\na) excited\n```\nSebastian pulled her closer.';
+  const r = normalizeThinkingBlock(text);
+  check('11e [BRAIN]:+fence, no tags → repaired', r.repaired, true);
+  check('11e thinking has content', r.thinking.includes('STARTING ROLEPLAY'), true);
+  check('11e [BRAIN] stripped', !r.thinking.includes('[BRAIN]'), true);
+  check('11e reply preserved', r.rest.includes('Sebastian'), true);
+}
 
 // ── 12. rebuildMessageText (raw source → canonical fenced form) ──
 {
