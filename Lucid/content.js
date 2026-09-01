@@ -513,6 +513,22 @@
   // safety interval may tick in the window between arming and navigation, and
   // must NOT delete on the page that armed it — the fresh page does that.
   let deleteJustArmed = false;
+  // Per-tab session id. sessionStorage is scoped to ONE tab and survives a
+  // reload of that tab — so the fresh page after refresh has the SAME id as
+  // the arming page, while OTHER tabs have a different id. The pending-delete
+  // flag is tagged with this id so only the tab that armed it (and its own
+  // post-refresh page) can perform the delete. Prevents cross-tab deletion
+  // when roleplaying in two tabs at once.
+  let tabSessionId = '';
+  try {
+    tabSessionId = sessionStorage.getItem('djtfTabSession');
+    if (!tabSessionId) {
+      tabSessionId = 's' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+      sessionStorage.setItem('djtfTabSession', tabSessionId);
+    }
+  } catch (_) {
+    tabSessionId = 'mem' + Math.random().toString(36).slice(2, 10);
+  }
 
   function showRefreshToast() {
     if (!autoRefresh || refreshToastActive) return;
@@ -565,7 +581,9 @@
             // This page armed the flag — mark it so no interval tick deletes
             // here before the reload navigates.
             deleteJustArmed = true;
-            chrome.storage.local.set({ djtfDeletePending: stopCopyText }, doReload);
+            // Tag the flag with THIS tab's session id so only this tab (after
+            // its own refresh) can delete — other tabs never see a match.
+            chrome.storage.local.set({ djtfDeletePending: stopCopyText, djtfDeleteSession: tabSessionId }, doReload);
             return; // reload happens in the set callback (guarantees persistence)
           } catch (_) { /* fall through */ }
         }
@@ -762,10 +780,16 @@
                                                   // This page's interval must never delete before navigating.
                                                   if (deleteJustArmed) return;
                                                   try {
-                                                    chrome.storage.local.get(['djtfDeletePending'], (res) => {
+                                                    chrome.storage.local.get(['djtfDeletePending', 'djtfDeleteSession'], (res) => {
                                                       try {
                                                         const pending = res && res.djtfDeletePending;
                                                         if (!pending) return;
+                                                        // CROSS-TAB GUARD: the flag is tagged with the session id of
+                                                        // the tab that armed it. If it doesn't match THIS tab, this
+                                                        // is a different tab's pending delete (user is roleplaying in
+                                                        // two tabs) — never delete here. Only the owning tab (after
+                                                        // its own refresh) performs the delete.
+                                                        if (res.djtfDeleteSession !== tabSessionId) return;
                                                         let g = findPendingUserMessage(pending);
                                                         // If exact text matching keeps failing (the copied text can
                                                         // differ from the post-refresh DOM — e.g. a thinking block

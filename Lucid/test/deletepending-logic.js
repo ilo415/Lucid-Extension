@@ -4,13 +4,14 @@ let pass = 0, fail = 0;
 function check(name, cond) { if (cond) { pass++; } else { fail++; console.log('FAIL: ' + name); } }
 
 // Simulate the storage + matching logic (mirrors content.js).
-function makeDeleteSimulator() {
-  let store = { djtfDeletePending: null };
+function makeDeleteSimulator(sessionId) {
+  let store = { djtfDeletePending: null, djtfDeleteSession: null };
   const messages = []; // {isBot, text}
-  let deleted = [];
+  let deleted = 0;
+  const mySession = sessionId || ('s' + Math.random().toString(36).slice(2, 10));
 
   return {
-    setPending(t) { store.djtfDeletePending = t; },
+    setPending(t, session) { store.djtfDeletePending = t; store.djtfDeleteSession = session || mySession; },
     getPending() { return store.djtfDeletePending; },
     addMessage(isBot, text) { messages.push({ isBot, text }); },
     findPendingUserMessage(text) {
@@ -25,9 +26,10 @@ function makeDeleteSimulator() {
     tick() {
       const pending = store.djtfDeletePending;
       if (!pending) return 'noop';
+      // CROSS-TAB GUARD: session must match this tab.
+      if (store.djtfDeleteSession !== mySession) return 'other-tab';
       const g = this.findPendingUserMessage(pending);
       if (!g) return 'retry';
-      // "click delete"
       deleted++;
       store.djtfDeletePending = null;
       return 'deleted';
@@ -37,7 +39,7 @@ function makeDeleteSimulator() {
 }
 
 (async () => {
-  const s = makeDeleteSimulator();
+  const s = makeDeleteSimulator('tab-A-session');
 
   // 1) No pending → noop
   check('no pending → noop', s.tick() === 'noop');
@@ -62,6 +64,22 @@ function makeDeleteSimulator() {
   s.setPending('User msg');
   check('tick → deleted (user)', s.tick() === 'deleted');
   check('flag cleared', s.getPending() === null);
+
+  // 5) CROSS-TAB: another tab sees the flag, but session doesn't match → no delete
+  const tabB = makeDeleteSimulator('tab-B-session');
+  tabB.addMessage(false, 'Message that tab A wants to delete');
+  tabB.setPending('Message that tab A wants to delete', 'tab-A-session'); // armed in tab A
+  check('tab B sees A\'s flag → other-tab (no delete)', tabB.tick() === 'other-tab');
+  check('tab B deleted nothing', tabB.deletedCount() === 0);
+  check('flag still present for tab A', tabB.getPending() === 'Message that tab A wants to delete');
+
+  // 6) Same tab AFTER refresh keeps its session → deletes correctly
+  // (tab A reloads: fresh page, same sessionStorage id, flag still there)
+  const tabA_afterRefresh = makeDeleteSimulator('tab-A-session');
+  tabA_afterRefresh.addMessage(false, 'Message that tab A wants to delete');
+  tabA_afterRefresh.setPending('Message that tab A wants to delete', 'tab-A-session');
+  check('tab A after refresh → deleted', tabA_afterRefresh.tick() === 'deleted');
+  check('tab A after refresh deleted 1', tabA_afterRefresh.deletedCount() === 1);
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
