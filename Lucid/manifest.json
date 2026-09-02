@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Lucid",
-  "version": "1.11",
+  "version": "1.11.1",
   "description": "Mends DreamJourney thinking blocks — broken fences, missing or swapped <thinking> tags, typos — via a per-message fix button, and lets you send an empty message to continue a reply.",
   "permissions": ["storage"],
-  "host_permissions": ["https://dreamjourneyai.com/*"],
+  "host_permissions": ["https://dreamjourneyai.com/*", "https://www.dreamjourneyai.com/*"],
   "action": {
     "default_popup": "popup.html",
     "default_title": "Lucid",
@@ -16,7 +16,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://dreamjourneyai.com/app/*"],
+      "matches": ["https://dreamjourneyai.com/app/*", "https://www.dreamjourneyai.com/app/*"],
       "js": ["fixer-core.js", "content.js"],
       "css": ["styles.css"],
       "run_at": "document_end"

@@ -16,10 +16,11 @@ const content = fs.readFileSync(path.join(desktop, 'content.js'), 'utf8');
 const header = `// ==UserScript==
 // @name         Lucid (Mobile)
 // @namespace    lucid-mobile
-// @version      1.11.0
+// @version      1.11.1
 // @description  Mends DreamJourney thinking blocks on phones: broken fences, missing/swapped/typo'd thinking tags, plus a per-message fix button and empty-send continue. Desktop-extension logic bundled as a user script.
-// @author       Nyveria
+// @author       iLo415
 // @match        https://dreamjourneyai.com/app/*
+// @match        https://www.dreamjourneyai.com/app/*
 // @run-at       document-end
 // @grant        GM_getValue
 // @grant        GM_setValue
